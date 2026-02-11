@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=mwan4
 PKG_VERSION:=0.0.1
-PKG_RELEASE:=8
+PKG_RELEASE:=9
 PKG_LICENSE:=AGPL-3.0-or-later
 PKG_MAINTAINER:=Stan Grishin <stangri@melmac.ca>
 

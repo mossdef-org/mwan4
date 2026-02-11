@@ -58,11 +58,52 @@ LOG()
 	logger -t "${SCRIPTNAME}[$$]" -p $facility "$*"
 }
 
+# Get list of families for an interface
+# Supports both 'list family' (new) and 'option family' (legacy, auto-migrated)
+# Defaults to 'ipv4' if no family specified
+mwan4_get_families()
+{
+	local iface="$2"
+	local families
+
+	config_get_list families "$iface" family
+
+	# Default to ipv4 if no family specified
+	[ -z "$families" ] && families="ipv4"
+
+	export "$1=$families"
+}
+
+# Execute callback for each family of an interface
+# Usage: mwan4_foreach_family <interface> <callback> [additional args...]
+# Callback receives: <interface> <family> [additional args...]
+mwan4_foreach_family()
+{
+	local iface="$1"
+	local callback="$2"
+	shift 2
+	local families family
+
+	mwan4_get_families families "$iface"
+
+	for family in $families; do
+		"$callback" "$iface" "$family" "$@"
+	done
+}
+
 mwan4_get_true_iface()
 {
 	local family V
 	_true_iface=$2
-	config_get family "$2" family ipv4
+
+	# If family is provided as 3rd argument, use it
+	# Otherwise get it from config (backward compatibility)
+	if [ -n "$3" ]; then
+		family="$3"
+	else
+		config_get family "$2" family ipv4
+	fi
+
 	if [ "$family" = "ipv4" ]; then
 		V=4
 	elif [ "$family" = "ipv6" ]; then
@@ -76,10 +117,18 @@ mwan4_get_src_ip()
 {
 	local family _src_ip interface true_iface device addr_cmd default_ip IP sed_str
 	interface=$2
-	mwan4_get_true_iface true_iface $interface
+
+	# If family is provided as 3rd argument, use it
+	# Otherwise get it from config (backward compatibility)
+	if [ -n "$3" ]; then
+		family="$3"
+	else
+		config_get family "$interface" family ipv4
+	fi
+
+	mwan4_get_true_iface true_iface "$interface" "$family"
 
 	unset "$1"
-	config_get family "$interface" family ipv4
 	if [ "$family" = "ipv4" ]; then
 		addr_cmd='network_get_ipaddr'
 		default_ip="0.0.0.0"
@@ -140,7 +189,13 @@ readfile() {
 mwan4_get_mwan4track_status()
 {
 	local interface=$2
+	local family="$3"
+	local status_iface="$interface"
 	local track_ips pid cmdline started
+
+	# For dual-stack, use family-specific status directory
+	[ -n "$family" ] && status_iface="${interface}_${family}"
+
 	mwan4_list_track_ips()
 	{
 		track_ips="$1 $track_ips"
@@ -151,17 +206,17 @@ mwan4_get_mwan4track_status()
 		export -n "$1=disabled"
 		return
 	fi
-	readfile pid $MWAN4TRACK_STATUS_DIR/$interface/PID 2>/dev/null
+	readfile pid "$MWAN4TRACK_STATUS_DIR/$status_iface/PID" 2>/dev/null
 	if [ -z "$pid" ]; then
 		export -n "$1=down"
 		return
 	fi
 	readfile cmdline /proc/$pid/cmdline 2>/dev/null
-	if [ $cmdline != "/bin/sh/usr/sbin/mwan4track${interface}" ]; then
+	if [ "$cmdline" != "/bin/sh/usr/sbin/mwan4track${status_iface}" ]; then
 		export -n "$1=down"
 		return
 	fi
-	readfile started $MWAN4TRACK_STATUS_DIR/$interface/STARTED
+	readfile started "$MWAN4TRACK_STATUS_DIR/$status_iface/STARTED"
 	case "$started" in
 		0)
 			export -n "$1=paused"

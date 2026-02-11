@@ -22,7 +22,23 @@ mwan4_migrate_flush_conntrack() {
 	uci_commit mwan4
 }
 
+mwan4_migrate_family() {
+	local iface="$1"
+	local family
+
+	# Check if using old 'option family' format
+	config_get family "${iface}" family
+	if [ -n "$family" ]; then
+		# Convert to new 'list family' format
+		uci_remove mwan4 "$iface" family
+		uci_add_list mwan4 "$iface" family "$family"
+	fi
+
+	uci_commit mwan4
+}
+
 config_load mwan4
 config_foreach mwan4_migrate_flush_conntrack interface
+config_foreach mwan4_migrate_family interface
 
 exit 0

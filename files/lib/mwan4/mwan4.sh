@@ -41,18 +41,27 @@ mwan4_update_dev_to_table()
 	# shellcheck disable=SC2034
 	mwan4_dev_tbl_ipv6=" "
 
-	update_table()
+	update_table_family()
 	{
-		local family curr_table device enabled
-		let _tid++
-		config_get family "$1" family ipv4
-		network_get_device device "$1"
+		local iface family curr_table device enabled
+		iface="$1"
+		family="$2"
+
+		network_get_device device "$iface"
 		[ -z "$device" ] && return
-		config_get_bool enabled "$1" enabled
+		config_get_bool enabled "$iface" enabled
 		[ "$enabled" -eq 0 ] && return
 		curr_table=$(eval "echo	 \"\$mwan4_dev_tbl_${family}\"")
 		export "mwan4_dev_tbl_$family=${curr_table}${device}=$_tid "
 	}
+
+	update_table()
+	{
+		let _tid++
+		# Add entry for each family configured on this interface
+		mwan4_foreach_family "$1" update_table_family
+	}
+
 	network_flush_cache
 	config_foreach update_table interface
 }
@@ -803,18 +812,20 @@ mwan4_delete_iface_nftset_entries()
 	done
 }
 
-mwan4_set_policy()
+mwan4_set_policy_family()
 {
 	local id iface family metric weight device is_lowest is_offline nftflag total_weight
+	local member_id
 
-	is_lowest=0
-	config_get iface "$1" interface
-	config_get metric "$1" metric 1
-	config_get weight "$1" weight 1
+	member_id="$1"
+	iface="$2"
+	family="$3"
 
-	[ -n "$iface" ] || return 0
+	config_get metric "$member_id" metric 1
+	config_get weight "$member_id" weight 1
+
 	network_get_device device "$iface"
-	[ "$metric" -gt $DEFAULT_LOWEST_METRIC ] && LOG warn "Member interface $iface has >$DEFAULT_LOWEST_METRIC metric. Not appending to policy" && return 0
+	[ "$metric" -gt $DEFAULT_LOWEST_METRIC ] && return 0
 
 	mwan4_get_iface_id id "$iface"
 
@@ -823,7 +834,7 @@ mwan4_set_policy()
 	[ "$(mwan4_get_iface_hotplug_state "$iface")" = "online" ]
 	is_offline=$?
 
-	config_get family "$iface" family ipv4
+	is_lowest=0
 
 	if [ "$family" = "ipv4" ]; then
 		nftflag="$nftIPv4Flag"
@@ -866,6 +877,20 @@ mwan4_set_policy()
 		# Offline member - add device-based default marking
 		echo "offline:$iface:$device" >> "${nftTempFile}.policy_${policy}_${family}"
 	fi
+}
+
+mwan4_set_policy()
+{
+	local iface metric
+
+	config_get iface "$1" interface
+	config_get metric "$1" metric 1
+
+	[ -n "$iface" ] || return 0
+	[ "$metric" -gt $DEFAULT_LOWEST_METRIC ] && LOG warn "Member interface $iface has >$DEFAULT_LOWEST_METRIC metric. Not appending to policy" && return 0
+
+	# Add member to policy chains for each family configured on the interface
+	mwan4_foreach_family "$iface" mwan4_set_policy_family "$1" "$iface"
 }
 
 mwan4_create_policies_nftables()

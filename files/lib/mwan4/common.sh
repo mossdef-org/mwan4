@@ -66,7 +66,7 @@ mwan4_get_families()
 	local iface="$2"
 	local families
 
-	config_get_list families "$iface" family
+	config_get families "$iface" family
 
 	# Default to ipv4 if no family specified
 	[ -z "$families" ] && families="ipv4"

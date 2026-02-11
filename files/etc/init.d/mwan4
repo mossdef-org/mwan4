@@ -4,6 +4,7 @@
 
 readonly PKG_VERSION='dev'
 
+. "${IPKG_INSTROOT}/lib/functions.sh"
 . "${IPKG_INSTROOT}/lib/functions/network.sh"
 . "${IPKG_INSTROOT}/lib/mwan4/mwan4.sh"
 . "${IPKG_INSTROOT}/lib/mwan4/common.sh"

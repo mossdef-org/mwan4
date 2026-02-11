@@ -1,0 +1,34 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright 2026 MOSSDeF, Stan Grishin (stangri@melmac.ca).
+
+# Migrate mwan3 configuration to mwan4 (one-time migration)
+if [ -f /etc/config/mwan3 ] && [ ! -f /etc/config/mwan3.migrated ]; then
+	# Backup default mwan4 config if it exists
+	[ -f /etc/config/mwan4 ] && mv /etc/config/mwan4 /etc/config/mwan4.default
+
+	# Copy mwan3 config to mwan4
+	cp /etc/config/mwan3 /etc/config/mwan4
+
+	# Rename mwan3 config to prevent re-migration
+	mv /etc/config/mwan3 /etc/config/mwan3.migrated
+
+	logger -t mwan4-migration "Migrated /etc/config/mwan3 to /etc/config/mwan4"
+fi
+
+# Create nftables directory structure for mwan4
+mkdir -p /usr/share/nftables.d/ruleset-post
+
+# Remove old mwan3 iptables/ipset rules if they exist
+if command -v iptables >/dev/null 2>&1; then
+	iptables -t mangle -F mwan3_hook 2>/dev/null
+	iptables -t mangle -X mwan3_hook 2>/dev/null
+fi
+
+if command -v ipset >/dev/null 2>&1; then
+	for set in $(ipset list -n | grep ^mwan3_); do
+		ipset destroy "$set" 2>/dev/null
+	done
+fi
+
+exit 0

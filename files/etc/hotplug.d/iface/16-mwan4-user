@@ -1,0 +1,29 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Based on original mwan3 by Florian Eckert <fe@dev.tdt.de>
+
+[ -f "/etc/mwan4.user" ] && {
+	. /lib/functions.sh
+	. /lib/mwan4/common.sh
+	. /lib/mwan4/mwan4.sh
+	initscript=/etc/init.d/mwan4
+	. /lib/functions/procd.sh
+
+	[ "$MWAN4_SHUTDOWN" != 1 ] && procd_lock
+
+	[ "$MWAN4_SHUTDOWN" != 1 ] && ! /etc/init.d/mwan4 running && {
+		exit 0
+	}
+
+	config_load mwan4
+
+	config_get_bool enabled "$INTERFACE" enabled 0
+	[ "${enabled}" -eq 1 ] || {
+		exit 0
+	}
+
+	[ -x /etc/mwan4.user ] || chmod 755 /etc/mwan4.user
+	env -i ACTION="$ACTION" INTERFACE="$INTERFACE" DEVICE="$DEVICE" /etc/mwan4.user 1000>&-
+}
+
+exit 0

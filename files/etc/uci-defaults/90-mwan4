@@ -1,0 +1,28 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Based on original mwan3 by Florian Eckert <fe@dev.tdt.de>
+
+. /lib/functions.sh
+
+mwan4_migrate_flush_conntrack() {
+	local iface="$1"
+
+	config_get value "${iface}" flush_conntrack
+	case $value in
+		always)
+			uci_remove mwan4 "$iface" flush_conntrack
+			uci_add_list mwan4 "$iface" flush_conntrack ifup
+			uci_add_list mwan4 "$iface" flush_conntrack ifdown
+			;;
+		never)
+			uci_remove mwan4 "$iface" flush_conntrack
+			;;
+	esac
+
+	uci_commit mwan4
+}
+
+config_load mwan4
+config_foreach mwan4_migrate_flush_conntrack interface
+
+exit 0

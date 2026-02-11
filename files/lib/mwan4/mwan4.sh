@@ -517,13 +517,14 @@ EOF
 	LOG info "Created base nftables structure in $tmpfile"
 }
 
-mwan4_create_iface_nftables()
+mwan4_create_iface_nftables_family()
 {
-	local id family nftflag current tmpfile error iface device
+	local id family nftflag current tmpfile error iface device chain_name
 
 	iface="$1"
 	device="$2"
-	config_get family "$iface" family ipv4
+	family="$3"
+
 	mwan4_get_iface_id id "$iface"
 
 	[ -n "$id" ] || return 0
@@ -536,15 +537,15 @@ mwan4_create_iface_nftables()
 		return
 	fi
 
-	tmpfile="${nftIfaceFile}.tmp"
+	# Use family suffix for dual-stack interfaces
+	chain_name="${nftPrefix}_iface_in_${iface}_${family}"
 
-	# Check if the chain already exists
-	current=$($nft -a list chain inet ${nftTable} ${nftPrefix}_iface_in_${iface} 2>/dev/null)
+	tmpfile="${nftIfaceFile}.tmp"
 
 	# Create interface-specific chain
 	cat > "$tmpfile" <<EOF
 table inet ${nftTable} {
-	chain ${nftPrefix}_iface_in_${iface} {
+	chain ${chain_name} {
 EOF
 
 	# Add rules for custom/connected/dynamic sets
@@ -563,27 +564,36 @@ EOF
 
 	# Apply the nftables configuration
 	error=$($nft -f "$tmpfile" 2>&1) || {
-		LOG error "create_iface_nftables (${iface}): $error"
+		LOG error "create_iface_nftables_family (${iface}_${family}): $error"
 		return 1
 	}
 
 	# Add jump to this chain from mwan4_ifaces_in if not already present
-	if [ -z "$($nft -a list chain inet ${nftTable} ${nftPrefix}_ifaces_in 2>/dev/null | grep "jump ${nftPrefix}_iface_in_${iface}")" ]; then
-		$nft add rule inet ${nftTable} ${nftPrefix}_ifaces_in meta mark \& $MMX_MASK == 0 jump ${nftPrefix}_iface_in_${iface} 2>&1 | logger -t "${SCRIPTNAME}[$$]" -p error
-		LOG debug "create_iface_nftables: ${nftPrefix}_iface_in_${iface} not in nftables, adding"
+	if [ -z "$($nft -a list chain inet ${nftTable} ${nftPrefix}_ifaces_in 2>/dev/null | grep "jump ${chain_name}")" ]; then
+		$nft add rule inet ${nftTable} ${nftPrefix}_ifaces_in meta mark \& $MMX_MASK == 0 ${nftflag} jump ${chain_name} 2>&1 | logger -t "${SCRIPTNAME}[$$]" -p error
+		LOG debug "create_iface_nftables_family: ${chain_name} not in nftables, adding"
 	else
-		LOG debug "create_iface_nftables: ${nftPrefix}_iface_in_${iface} already in nftables, skip"
+		LOG debug "create_iface_nftables_family: ${chain_name} already in nftables, skip"
 	fi
 
 	rm -f "$tmpfile"
 }
 
-mwan4_delete_iface_nftables()
+mwan4_create_iface_nftables()
 {
-	local iface family nftflag error handle
+	local iface="$1"
+	local device="$2"
+
+	# Create chains for each family configured on this interface
+	mwan4_foreach_family "$iface" mwan4_create_iface_nftables_family "$device"
+}
+
+mwan4_delete_iface_nftables_family()
+{
+	local iface family nftflag error handle chain_name
 
 	iface="$1"
-	config_get family "$iface" family ipv4
+	family="$2"
 
 	if [ "$family" = "ipv4" ]; then
 		nftflag="$nftIPv4Flag"
@@ -594,9 +604,12 @@ mwan4_delete_iface_nftables()
 		return
 	fi
 
+	# Use family suffix for dual-stack interfaces
+	chain_name="${nftPrefix}_iface_in_${iface}_${family}"
+
 	# Find and delete the jump rule from mwan4_ifaces_in chain
 	handle=$($nft -a list chain inet ${nftTable} ${nftPrefix}_ifaces_in 2>/dev/null | \
-		grep "jump ${nftPrefix}_iface_in_${iface}" | \
+		grep "jump ${chain_name}" | \
 		sed -n 's/.*# handle \([0-9]*\)$/\1/p')
 
 	if [ -n "$handle" ]; then
@@ -605,8 +618,16 @@ mwan4_delete_iface_nftables()
 	fi
 
 	# Delete the interface-specific chain
-	$nft delete chain inet ${nftTable} ${nftPrefix}_iface_in_${iface} 2>&1 | \
+	$nft delete chain inet ${nftTable} ${chain_name} 2>&1 | \
 		logger -t "${SCRIPTNAME}[$$]" -p error
+}
+
+mwan4_delete_iface_nftables()
+{
+	local iface="$1"
+
+	# Delete chains for each family configured on this interface
+	mwan4_foreach_family "$iface" mwan4_delete_iface_nftables_family
 }
 
 mwan4_extra_tables_routes()
@@ -622,11 +643,13 @@ mwan4_get_routes()
 	} | sed -ne "$MWAN4_ROUTE_LINE_EXP" | sort -u
 }
 
-mwan4_create_iface_route()
+mwan4_create_iface_route_family()
 {
-	local tid route_line family IP id tbl
-	config_get family "$1" family ipv4
-	mwan4_get_iface_id id "$1"
+	local tid route_line family IP id tbl iface
+	iface="$1"
+	family="$2"
+
+	mwan4_get_iface_id id "$iface"
 
 	[ -n "$id" ] || return 0
 
@@ -652,15 +675,25 @@ mwan4_create_iface_route()
 	done
 }
 
-mwan4_delete_iface_route()
+mwan4_create_iface_route()
 {
-	local id family
+	local iface="$1"
 
-	config_get family "$1" family ipv4
-	mwan4_get_iface_id id "$1"
+	# Create routes for each family - they share the same table but use different IP commands
+	mwan4_foreach_family "$iface" mwan4_create_iface_route_family
+}
+
+mwan4_delete_iface_route_family()
+{
+	local id family iface
+
+	iface="$1"
+	family="$2"
+
+	mwan4_get_iface_id id "$iface"
 
 	if [ -z "$id" ]; then
-		LOG warn "delete_iface_route: could not find table id for interface $1"
+		LOG warn "delete_iface_route_family: could not find table id for interface $iface"
 		return 0
 	fi
 
@@ -671,12 +704,23 @@ mwan4_delete_iface_route()
 	fi
 }
 
-mwan4_create_iface_rules()
+mwan4_delete_iface_route()
 {
-	local id family IP
+	local iface="$1"
 
-	config_get family "$1" family ipv4
-	mwan4_get_iface_id id "$1"
+	# Delete routes for each family
+	mwan4_foreach_family "$iface" mwan4_delete_iface_route_family
+}
+
+mwan4_create_iface_rules_family()
+{
+	local id family IP iface device
+
+	iface="$1"
+	family="$2"
+	device="$3"
+
+	mwan4_get_iface_id id "$iface"
 
 	[ -n "$id" ] || return 0
 
@@ -688,19 +732,30 @@ mwan4_create_iface_rules()
 		return
 	fi
 
-	mwan4_delete_iface_rules "$1"
+	mwan4_delete_iface_rules_family "$iface" "$family"
 
-	$IP rule add pref $((id+1000)) iif "$2" lookup "$id"
+	$IP rule add pref $((id+1000)) iif "$device" lookup "$id"
 	$IP rule add pref $((id+2000)) fwmark "$(mwan4_id2mask id MMX_MASK)/$MMX_MASK" lookup "$id"
 	$IP rule add pref $((id+3000)) fwmark "$(mwan4_id2mask id MMX_MASK)/$MMX_MASK" unreachable
 }
 
-mwan4_delete_iface_rules()
+mwan4_create_iface_rules()
 {
-	local id family IP rule_id
+	local iface="$1"
+	local device="$2"
 
-	config_get family "$1" family ipv4
-	mwan4_get_iface_id id "$1"
+	# Create rules for each family
+	mwan4_foreach_family "$iface" mwan4_create_iface_rules_family "$device"
+}
+
+mwan4_delete_iface_rules_family()
+{
+	local id family IP rule_id iface
+
+	iface="$1"
+	family="$2"
+
+	mwan4_get_iface_id id "$iface"
 
 	[ -n "$id" ] || return 0
 
@@ -712,9 +767,17 @@ mwan4_delete_iface_rules()
 		return
 	fi
 
-	for rule_id in $(ip rule list | awk -F : '$1 % 1000 == '$id' && $1 > 1000 && $1 < 4000 {print $1}'); do
+	for rule_id in $($IP rule list | awk -F : '$1 % 1000 == '$id' && $1 > 1000 && $1 < 4000 {print $1}'); do
 		$IP rule del pref $rule_id
 	done
+}
+
+mwan4_delete_iface_rules()
+{
+	local iface="$1"
+
+	# Delete rules for each family
+	mwan4_foreach_family "$iface" mwan4_delete_iface_rules_family
 }
 
 mwan4_delete_iface_nftset_entries()
@@ -1329,12 +1392,20 @@ EOF
 
 mwan4_interface_hotplug_shutdown()
 {
-	local interface status device ifdown
+	local interface status device ifdown families family status_iface
 	interface="$1"
 	ifdown="$2"
-	[ -f $MWAN4TRACK_STATUS_DIR/$interface/STATUS ] && {
-		readfile status $MWAN4TRACK_STATUS_DIR/$interface/STATUS
-	}
+
+	# Check if any family is online
+	status=offline
+	mwan4_get_families families "$interface"
+	for family in $families; do
+		status_iface="${interface}_${family}"
+		[ -f "$MWAN4TRACK_STATUS_DIR/$status_iface/STATUS" ] && {
+			readfile status "$MWAN4TRACK_STATUS_DIR/$status_iface/STATUS"
+			[ "$status" = "online" ] && break
+		}
+	done
 
 	[ "$status" != "online" ] && [ "$ifdown" != 1 ] && return
 
@@ -1416,15 +1487,17 @@ mwan4_get_iface_hotplug_state() {
 	echo "$state"
 }
 
-mwan4_report_iface_status()
+mwan4_report_iface_status_family()
 {
-	local device result tracking IP
-	local status online uptime result
+	local device result tracking IP iface family status_iface
+	local status online uptime result id
 
-	mwan4_get_iface_id id "$1"
-	network_get_device device "$1"
-	config_get_bool enabled "$1" enabled 0
-	config_get family "$1" family ipv4
+	iface="$1"
+	family="$2"
+
+	mwan4_get_iface_id id "$iface"
+	network_get_device device "$iface"
+	config_get_bool enabled "$iface" enabled 0
 
 	if [ "$family" = "ipv4" ]; then
 		IP="$IP4"
@@ -1434,18 +1507,21 @@ mwan4_report_iface_status()
 		IP="$IP6"
 	fi
 
-	if [ -f "$MWAN4TRACK_STATUS_DIR/${1}/STATUS" ]; then
-		readfile status "$MWAN4TRACK_STATUS_DIR/${1}/STATUS"
+	# Use family-specific status directory
+	status_iface="${iface}_${family}"
+
+	if [ -f "$MWAN4TRACK_STATUS_DIR/${status_iface}/STATUS" ]; then
+		readfile status "$MWAN4TRACK_STATUS_DIR/${status_iface}/STATUS"
 	else
 		status="unknown"
 	fi
 
 	if [ "$status" = "online" ]; then
-		get_online_time online "$1"
-		network_get_uptime uptime "$1"
+		get_online_time online "$iface"
+		network_get_uptime uptime "$iface"
 		online="$(printf '%02dh:%02dm:%02ds\n' $((online/3600)) $((online%3600/60)) $((online%60)))"
 		uptime="$(printf '%02dh:%02dm:%02ds\n' $((uptime/3600)) $((uptime%3600/60)) $((uptime%60)))"
-		result="$(mwan4_get_iface_hotplug_state $1) $online, uptime $uptime"
+		result="$(mwan4_get_iface_hotplug_state $iface) $online, uptime $uptime"
 	else
 		result=0
 		[ -n "$($IP rule | awk '$1 == "'$((id+1000)):'"')" ] ||
@@ -1454,19 +1530,27 @@ mwan4_report_iface_status()
 			result=$((result+2))
 		[ -n "$($IP rule | awk '$1 == "'$((id+3000)):'"')" ] ||
 			result=$((result+4))
-		[ -n "$($nft list chain inet ${nftTable} ${nftPrefix}_iface_in_$1 2> /dev/null)" ] ||
+		[ -n "$($nft list chain inet ${nftTable} ${nftPrefix}_iface_in_${iface}_${family} 2> /dev/null)" ] ||
 			result=$((result+8))
 		[ -n "$($IP route list table $id default dev $device 2> /dev/null)" ] ||
 			result=$((result+16))
 		[ "$result" = "0" ] && result=""
 	fi
 
-	mwan4_get_mwan4track_status tracking $1
+	mwan4_get_mwan4track_status tracking "$iface" "$family"
 	if [ -n "$result" ]; then
-		echo " interface $1 is $status and tracking is $tracking ($result)"
+		echo " interface $iface ($family) is $status and tracking is $tracking ($result)"
 	else
-		echo " interface $1 is $status and tracking is $tracking"
+		echo " interface $iface ($family) is $status and tracking is $tracking"
 	fi
+}
+
+mwan4_report_iface_status()
+{
+	local iface="$1"
+
+	# Report status for each family
+	mwan4_foreach_family "$iface" mwan4_report_iface_status_family
 }
 
 mwan4_report_policies()
@@ -1600,7 +1684,18 @@ mwan4_flush_conntrack()
 
 mwan4_track_clean()
 {
-	rm -rf "${MWAN4_STATUS_DIR:?}/${1}" &> /dev/null
+	local interface families family status_iface
+	interface="$1"
+
+	# Clean up family-specific status directories
+	mwan4_get_families families "$interface"
+	for family in $families; do
+		status_iface="${interface}_${family}"
+		rm -rf "${MWAN4TRACK_STATUS_DIR:?}/${status_iface}" &> /dev/null
+	done
+
+	rm -rf "${MWAN4_STATUS_DIR:?}/${interface}" &> /dev/null
 	rmdir --ignore-fail-on-non-empty "$MWAN4_STATUS_DIR"
+	rmdir --ignore-fail-on-non-empty "$MWAN4TRACK_STATUS_DIR"
 }
 

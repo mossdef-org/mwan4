@@ -47,7 +47,15 @@ config_get_bool enabled $INTERFACE 'enabled' '0'
 
 config_get initial_state $INTERFACE initial_state "online"
 if [ "$initial_state" = "offline" ]; then
-	readfile status $MWAN4TRACK_STATUS_DIR/$INTERFACE/STATUS 2>/dev/null || status="unknown"
+	status=offline
+	# Check if any family is online
+	local families family status_iface fam_status
+	mwan4_get_families families "$INTERFACE"
+	for family in $families; do
+		status_iface="${INTERFACE}_${family}"
+		readfile fam_status "$MWAN4TRACK_STATUS_DIR/$status_iface/STATUS" 2>/dev/null || fam_status="unknown"
+		[ "$fam_status" = "online" ] && status=online && break
+	done
 	[ "$status" = "online" ] || status=offline
 else
 	status=online
@@ -73,7 +81,14 @@ case "$ACTION" in
 				fw4 -q reload >/dev/null 2>&1 || LOG warn "Failed to reload fw4"
 			fi
 		fi
-		[ "$ACTION" = ifup ] && procd_running mwan4 "track_$INTERFACE" && procd_send_signal mwan4 "track_$INTERFACE" USR2
+		if [ "$ACTION" = ifup ]; then
+			# Signal all family-specific tracking instances
+			local families family
+			mwan4_get_families families "$INTERFACE"
+			for family in $families; do
+				procd_running mwan4 "track_${INTERFACE}_${family}" && procd_send_signal mwan4 "track_${INTERFACE}_${family}" USR2
+			done
+		fi
 		;;
 	disconnected)
 		mwan4_set_iface_hotplug_state $INTERFACE "offline"
@@ -86,7 +101,12 @@ case "$ACTION" in
 		mwan4_delete_iface_rules $INTERFACE
 		mwan4_delete_iface_route $INTERFACE
 		mwan4_delete_iface_nftables $INTERFACE
-		procd_running mwan4 "track_$INTERFACE" && procd_send_signal mwan4 "track_$INTERFACE" USR1
+		# Signal all family-specific tracking instances
+		local families family
+		mwan4_get_families families "$INTERFACE"
+		for family in $families; do
+			procd_running mwan4 "track_${INTERFACE}_${family}" && procd_send_signal mwan4 "track_${INTERFACE}_${family}" USR1
+		done
 		mwan4_set_policies_nftables
 		fw4 -q reload >/dev/null 2>&1 || LOG warn "Failed to reload fw4"
 	;;

@@ -1002,7 +1002,7 @@ mwan4_set_sticky_nftables()
 	local family="${3}"
 	local policy="${4}"
 
-	local id iface nftflag mark
+	local id iface nftflag mark chain_name
 
 	# Check if this interface is in the policy
 	if $nft list chain inet ${nftTable} ${nftPrefix}_policy_${policy}_${family} 2>/dev/null | grep -q "comment \"$interface"; then
@@ -1012,8 +1012,9 @@ mwan4_set_sticky_nftables()
 
 		mark=$(mwan4_id2mask id MMX_MASK)
 
-		# Check if the interface chain exists
-		if $nft list chain inet ${nftTable} ${nftPrefix}_iface_in_${interface} >/dev/null 2>&1; then
+		# Check if the family-specific interface chain exists
+		chain_name="${nftPrefix}_iface_in_${interface}_${family}"
+		if $nft list chain inet ${nftTable} ${chain_name} >/dev/null 2>&1; then
 			# Add sticky session rules to the rule chain
 			# These will be added to the rule-specific chain during user rule processing
 			echo "sticky:$interface:$mark:$family" >> "${nftTempFile}.rule_${rule}_sticky"
@@ -1219,7 +1220,7 @@ mwan4_set_user_nftables_rule()
 
 mwan4_set_user_iface_rules()
 {
-	local iface device family is_src_iface
+	local iface device families is_src_iface
 	iface=$1
 	device=$2
 
@@ -1228,10 +1229,9 @@ mwan4_set_user_iface_rules()
 		return
 	fi
 
-	config_get family "$iface" family ipv4
-
-	# Check if any rules already exist for this device in nftables
-	$nft list chain inet ${nftTable} ${nftPrefix}_rules 2>/dev/null | grep -q "iifname \"$device\"" && return
+	# Check if any rules already exist for this device in nftables (check both family-specific rule chains)
+	$nft list chain inet ${nftTable} ${nftPrefix}_rules_ipv4 2>/dev/null | grep -q "iifname \"$device\"" && return
+	[ $NO_IPV6 -eq 0 ] && $nft list chain inet ${nftTable} ${nftPrefix}_rules_ipv6 2>/dev/null | grep -q "iifname \"$device\"" && return
 
 	is_src_iface=0
 

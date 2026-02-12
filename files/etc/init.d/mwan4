@@ -28,11 +28,12 @@ start_tracker_family() {
 }
 
 start_tracker() {
-	local enabled interface
+	local enabled track_ip interface
 	interface=$1
 	config_get_bool enabled "$interface" 'enabled' '0'
+	config_get_list track_ip "$interface" 'track_ip'
 	[ $enabled -eq 0 ] && return
-	[ -z "$(config_get $interface track_ip)" ] && return
+	[ -z "$track_ip" ] && return
 
 	# Spawn tracker for each family
 	mwan4_foreach_family "$interface" start_tracker_family

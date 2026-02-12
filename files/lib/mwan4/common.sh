@@ -5,6 +5,7 @@
 IP4="ip -4"
 IP6="ip -6"
 SCRIPTNAME="$(basename "$0")"
+config_get_list() { config_get "$@"; }
 
 MWAN4_STATUS_DIR="/var/run/mwan4"
 MWAN4_STATUS_NFT_LOG_DIR="${MWAN4_STATUS_DIR}/nft_log"
@@ -66,7 +67,7 @@ mwan4_get_families()
 	local iface="$2"
 	local families
 
-	config_get families "$iface" family
+	config_get_list families "$iface" family
 
 	# Default to ipv4 if no family specified
 	[ -z "$families" ] && families="ipv4"

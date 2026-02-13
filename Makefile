@@ -17,7 +17,7 @@ define Package/mwan4
   CATEGORY:=Network
   SUBMENU:=Routing and Redirection
   TITLE:=Multiwan with nftables support
-  URL:=https://github.com/stangri/mwan4/
+  URL:=https://github.com/mossdef-org/mwan4/
   PKGARCH:=all
   CONFLICTS:=mwan3
   DEPENDS:= \

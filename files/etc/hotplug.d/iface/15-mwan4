@@ -66,7 +66,7 @@ LOG notice "Execute $ACTION event on interface $INTERFACE (${DEVICE:-unknown})"
 case "$ACTION" in
 	connected)
 		mwan4_set_iface_hotplug_state $INTERFACE "online"
-		mwan4_set_policies_nftables
+		mwan4_set_strategies_nftables
 		fw4 -q reload >/dev/null 2>&1 || LOG warn "Failed to reload fw4"
 		;;
 	ifup)
@@ -77,7 +77,7 @@ case "$ACTION" in
 			mwan4_create_iface_route $INTERFACE $DEVICE
 			mwan4_set_general_rules
 			if [ "$status" = "online" ]; then
-				mwan4_set_policies_nftables
+				mwan4_set_strategies_nftables
 				fw4 -q reload >/dev/null 2>&1 || LOG warn "Failed to reload fw4"
 			fi
 		fi
@@ -92,7 +92,7 @@ case "$ACTION" in
 		;;
 	disconnected)
 		mwan4_set_iface_hotplug_state $INTERFACE "offline"
-		mwan4_set_policies_nftables
+		mwan4_set_strategies_nftables
 		fw4 -q reload >/dev/null 2>&1 || LOG warn "Failed to reload fw4"
 		;;
 	ifdown)
@@ -107,7 +107,7 @@ case "$ACTION" in
 		for family in $families; do
 			procd_running mwan4 "track_${INTERFACE}_${family}" && procd_send_signal mwan4 "track_${INTERFACE}_${family}" USR1
 		done
-		mwan4_set_policies_nftables
+		mwan4_set_strategies_nftables
 		fw4 -q reload >/dev/null 2>&1 || LOG warn "Failed to reload fw4"
 	;;
 esac

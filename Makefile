@@ -5,8 +5,8 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=mwan4
-PKG_VERSION:=0.0.1
-PKG_RELEASE:=13
+PKG_VERSION:=0.1.0
+PKG_RELEASE:=1
 PKG_LICENSE:=AGPL-3.0-or-later
 PKG_MAINTAINER:=Stan Grishin <stangri@melmac.ca>
 
@@ -106,6 +106,8 @@ define Package/mwan4/install
 	$(INSTALL_BIN) ./files/etc/uci-defaults/90-mwan4 \
 		$(1)/etc/uci-defaults/
 	$(INSTALL_BIN) ./files/etc/uci-defaults/91-mwan4-nft \
+		$(1)/etc/uci-defaults/
+	$(INSTALL_BIN) ./files/etc/uci-defaults/92-mwan4-rename \
 		$(1)/etc/uci-defaults/
 endef
 

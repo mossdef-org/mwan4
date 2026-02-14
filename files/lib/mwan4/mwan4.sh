@@ -812,17 +812,17 @@ mwan4_delete_iface_nftset_entries()
 	done
 }
 
-mwan4_set_policy_family()
+mwan4_set_strategy_family()
 {
 	local id iface family metric weight device is_lowest is_offline nftflag total_weight
-	local member_id
+	local route_id
 
-	member_id="$1"
+	route_id="$1"
 	iface="$2"
 	family="$3"
 
-	config_get metric "$member_id" metric 1
-	config_get weight "$member_id" weight 1
+	config_get metric "$route_id" metric 1
+	config_get weight "$route_id" weight 1
 
 	network_get_device device "$iface"
 	[ "$metric" -gt $DEFAULT_LOWEST_METRIC ] && return 0
@@ -866,20 +866,20 @@ mwan4_set_policy_family()
 		fi
 	fi
 
-	# Store policy member info for later nftables generation
+	# Store strategy route info for later nftables generation
 	if [ $is_lowest -eq 1 ]; then
-		# First member with lowest metric - will flush and recreate chain
-		echo "flush:$iface:$weight:$weight:$(mwan4_id2mask id MMX_MASK)" >> "${nftTempFile}.policy_${policy}_${family}"
+		# First route with lowest metric - will flush and recreate chain
+		echo "flush:$iface:$weight:$weight:$(mwan4_id2mask id MMX_MASK)" >> "${nftTempFile}.strategy_${strategy}_${family}"
 	elif [ $is_offline -eq 0 ]; then
-		# Additional member - load balancing using numgen
-		echo "member:$iface:$weight:$total_weight:$(mwan4_id2mask id MMX_MASK)" >> "${nftTempFile}.policy_${policy}_${family}"
+		# Additional route - load balancing using numgen
+		echo "route:$iface:$weight:$total_weight:$(mwan4_id2mask id MMX_MASK)" >> "${nftTempFile}.strategy_${strategy}_${family}"
 	elif [ -n "$device" ]; then
-		# Offline member - add device-based default marking
-		echo "offline:$iface:$device" >> "${nftTempFile}.policy_${policy}_${family}"
+		# Offline route - add device-based default marking
+		echo "offline:$iface:$device" >> "${nftTempFile}.strategy_${strategy}_${family}"
 	fi
 }
 
-mwan4_set_policy()
+mwan4_set_strategy()
 {
 	local iface metric
 
@@ -887,24 +887,24 @@ mwan4_set_policy()
 	config_get metric "$1" metric 1
 
 	[ -n "$iface" ] || return 0
-	[ "$metric" -gt $DEFAULT_LOWEST_METRIC ] && LOG warn "Member interface $iface has >$DEFAULT_LOWEST_METRIC metric. Not appending to policy" && return 0
+	[ "$metric" -gt $DEFAULT_LOWEST_METRIC ] && LOG warn "Route interface $iface has >$DEFAULT_LOWEST_METRIC metric. Not appending to strategy" && return 0
 
-	# Add member to policy chains for each family configured on the interface
-	mwan4_foreach_family "$iface" mwan4_set_policy_family "$1" "$iface"
+	# Add route to strategy chains for each family configured on the interface
+	mwan4_foreach_family "$iface" mwan4_set_strategy_family "$1" "$iface"
 }
 
-mwan4_create_policies_nftables()
+mwan4_create_strategies_nftables()
 {
-	local last_resort lowest_metric_v4 lowest_metric_v6 total_weight_v4 total_weight_v6 policy tmpfile error
+	local last_resort lowest_metric_v4 lowest_metric_v6 total_weight_v4 total_weight_v6 strategy tmpfile error
 	local family nftflag line action iface weight total_weight mark device
 	local cumulative_weight mod_value last_resort_mark
 
-	policy="$1"
+	strategy="$1"
 
 	config_get last_resort "$1" last_resort unreachable
 
 	if [ "$1" != "$(echo "$1" | cut -c1-15)" ]; then
-		LOG warn "Policy $1 exceeds max of 15 chars. Not setting policy" && return 0
+		LOG warn "Strategy $1 exceeds max of 15 chars. Not setting strategy" && return 0
 	fi
 
 	# Determine last_resort mark
@@ -922,7 +922,7 @@ mwan4_create_policies_nftables()
 
 	tmpfile="${nftPolicyFile}.tmp"
 
-	# Start building the policy chains
+	# Start building the strategy chains
 	cat > "$tmpfile" <<EOF
 table inet ${nftTable} {
 EOF
@@ -936,33 +936,33 @@ EOF
 			nftflag="$nftIPv6Flag"
 		fi
 
-		# Create the policy chain
+		# Create the strategy chain
 		cat >> "$tmpfile" <<EOF
-	chain ${nftPrefix}_policy_${policy}_${family} {
+	chain ${nftPrefix}_strategy_${strategy}_${family} {
 		meta mark & $MMX_MASK == 0 meta mark set $last_resort_mark comment "$last_resort"
 EOF
 
-		# Process members if temp file exists
-		if [ -f "${nftTempFile}.policy_${policy}_${family}" ]; then
+		# Process routes if temp file exists
+		if [ -f "${nftTempFile}.strategy_${strategy}_${family}" ]; then
 			cumulative_weight=0
 			total_weight=0
 
 			# First pass: calculate total weight
 			while IFS=: read -r action iface weight total mark device; do
-				[ "$action" = "member" ] && total_weight=$total
-			done < "${nftTempFile}.policy_${policy}_${family}"
+				[ "$action" = "route" ] && total_weight=$total
+			done < "${nftTempFile}.strategy_${strategy}_${family}"
 
 			# Second pass: generate load balancing rules
 			while IFS=: read -r action iface weight total mark device; do
 				case "$action" in
 					flush)
-						# Just note it's the first member, already handled by chain creation
+						# Just note it's the first route, already handled by chain creation
 						cumulative_weight=$weight
 						cat >> "$tmpfile" <<EOF
 		meta mark & $MMX_MASK == 0 meta mark set $mark comment "$iface $weight $weight"
 EOF
 						;;
-					member)
+					route)
 						# Load balancing with numgen
 						mod_value=$total_weight
 						cat >> "$tmpfile" <<EOF
@@ -971,20 +971,20 @@ EOF
 						cumulative_weight=$((cumulative_weight + weight))
 						;;
 					offline)
-						# Check if any online member exists before adding offline rule
+						# Check if any online route exists before adding offline rule
 					# Also ensure device is non-empty to avoid nftables syntax error
 						if [ -n "$device" ] && \
-					   ! grep -q "^member:" "${nftTempFile}.policy_${policy}_${family}" && \
-					   ! grep -q "^flush:" "${nftTempFile}.policy_${policy}_${family}"; then
+					   ! grep -q "^route:" "${nftTempFile}.strategy_${strategy}_${family}" && \
+					   ! grep -q "^flush:" "${nftTempFile}.strategy_${strategy}_${family}"; then
 							cat >> "$tmpfile" <<EOF
 		oifname "$device" meta mark & $MMX_MASK == 0 meta mark set $MMX_DEFAULT comment "out $iface $device"
 EOF
 						fi
 						;;
 				esac
-			done < "${nftTempFile}.policy_${policy}_${family}"
+			done < "${nftTempFile}.strategy_${strategy}_${family}"
 
-			rm -f "${nftTempFile}.policy_${policy}_${family}"
+			rm -f "${nftTempFile}.strategy_${strategy}_${family}"
 		fi
 
 		cat >> "$tmpfile" <<EOF
@@ -998,26 +998,26 @@ EOF
 
 	# Apply the nftables configuration
 	error=$($nft -f "$tmpfile" 2>&1) || {
-		LOG error "create_policies_nftables ($1): $error"
+		LOG error "create_strategies_nftables ($1): $error"
 		rm -f "$tmpfile"
 		return 1
 	}
 
 	rm -f "$tmpfile"
 
-	# Now process the members to populate the chains
+	# Now process the routes to populate the chains
 	lowest_metric_v4=$DEFAULT_LOWEST_METRIC
 	total_weight_v4=0
 
 	lowest_metric_v6=$DEFAULT_LOWEST_METRIC
 	total_weight_v6=0
 
-	config_list_foreach "$1" use_member mwan4_set_policy
+	config_list_foreach "$1" use_route mwan4_set_strategy
 }
 
-mwan4_set_policies_nftables()
+mwan4_set_strategies_nftables()
 {
-	config_foreach mwan4_create_policies_nftables policy
+	config_foreach mwan4_create_strategies_nftables strategy
 }
 
 mwan4_set_sticky_nftables()
@@ -1025,12 +1025,12 @@ mwan4_set_sticky_nftables()
 	local interface="${1}"
 	local rule="${2}"
 	local family="${3}"
-	local policy="${4}"
+	local strategy="${4}"
 
 	local id iface nftflag mark chain_name
 
-	# Check if this interface is in the policy
-	if $nft list chain inet ${nftTable} ${nftPrefix}_policy_${policy}_${family} 2>/dev/null | grep -q "comment \"$interface"; then
+	# Check if this interface is in the strategy
+	if $nft list chain inet ${nftTable} ${nftPrefix}_strategy_${strategy}_${family} 2>/dev/null | grep -q "comment \"$interface"; then
 		mwan4_get_iface_id id "$interface"
 
 		[ -n "$id" ] || return 0
@@ -1088,14 +1088,14 @@ EOF
 
 mwan4_set_user_nftables_rule()
 {
-	local ipset family proto policy src_ip src_port src_iface src_dev
-	local sticky dest_ip dest_port use_policy timeout policy_name rule family_flag
-	local global_logging rule_logging loglevel rule_policy nftflag
+	local ipset family proto strategy src_ip src_port src_iface src_dev
+	local sticky dest_ip dest_port use_strategy timeout strategy_name rule family_flag
+	local global_logging rule_logging loglevel rule_strategy nftflag
 	local proto_spec src_spec dest_spec ipset_spec port_spec mark_action
 
 	rule="$1"
 	family_flag="$2"  # ipv4 or ipv6
-	rule_policy=0
+	rule_strategy=0
 
 	config_get sticky "$1" sticky 0
 	config_get timeout "$1" timeout 600
@@ -1106,15 +1106,17 @@ mwan4_set_user_nftables_rule()
 	config_get src_port "$1" src_port
 	config_get dest_ip "$1" dest_ip
 	config_get dest_port "$1" dest_port
-	config_get use_policy "$1" use_policy
-	config_get family "$1" family any
+	config_get use_strategy "$1" use_strategy
+	config_get_list family "$1" family
 	config_get rule_logging "$1" logging 0
 	config_get global_logging globals logging 0
 	config_get loglevel globals loglevel notice
 
 	[ "$family_flag" = "ipv6" ] && [ $NO_IPV6 -ne 0 ] && return
-	[ "$family" = "ipv4" ] && [ "$family_flag" = "ipv6" ] && return
-	[ "$family" = "ipv6" ] && [ "$family_flag" = "ipv4" ] && return
+	# If family list is set, skip if current family_flag is not in it
+	if [ -n "$family" ]; then
+		echo "$family" | grep -qw "$family_flag" || return
+	fi
 
 	# Fix malformed IPv6 addresses BEFORE validation (UCI might strip leading :: in some cases)
 	# Check for any dest_ip that looks like /0, /64, etc. without leading address
@@ -1173,7 +1175,7 @@ mwan4_set_user_nftables_rule()
 		LOG warn "Rule $1 exceeds max of 15 chars. Not setting rule" && return 0
 	fi
 
-	[ -z "$use_policy" ] && return
+	[ -z "$use_strategy" ] && return
 
 	# Set nftflag based on family
 	if [ "$family_flag" = "ipv4" ]; then
@@ -1182,20 +1184,20 @@ mwan4_set_user_nftables_rule()
 		nftflag="$nftIPv6Flag"
 	fi
 
-	# Determine policy action
-	if [ "$use_policy" = "default" ]; then
-		policy_name="$use_policy"
+	# Determine strategy action
+	if [ "$use_strategy" = "default" ]; then
+		strategy_name="$use_strategy"
 		mark_action="meta mark set $MMX_DEFAULT"
-	elif [ "$use_policy" = "unreachable" ]; then
-		policy_name="$use_policy"
+	elif [ "$use_strategy" = "unreachable" ]; then
+		strategy_name="$use_strategy"
 		mark_action="meta mark set $MMX_UNREACHABLE"
-	elif [ "$use_policy" = "blackhole" ]; then
-		policy_name="$use_policy"
+	elif [ "$use_strategy" = "blackhole" ]; then
+		strategy_name="$use_strategy"
 		mark_action="meta mark set $MMX_BLACKHOLE"
 	else
-		rule_policy=1
-		policy_name="$use_policy"
-		mark_action="jump ${nftPrefix}_policy_${use_policy}_${family_flag}"
+		rule_strategy=1
+		strategy_name="$use_strategy"
+		mark_action="jump ${nftPrefix}_strategy_${use_strategy}_${family_flag}"
 		if [ "$sticky" -eq 1 ]; then
 			mwan4_set_sticky_nftset "$rule" "$MMX_MASK" "$timeout"
 		fi
@@ -1225,16 +1227,16 @@ mwan4_set_user_nftables_rule()
 	fi
 
 	# Store rule info for later nftables generation
-	if [ $rule_policy -eq 1 ] && [ "$sticky" -eq 1 ]; then
+	if [ $rule_strategy -eq 1 ] && [ "$sticky" -eq 1 ]; then
 		# Sticky session rule - needs special handling
 		# First collect sticky interface info to see if any interfaces match
-		config_foreach mwan4_set_sticky_nftables interface "$rule" "$family_flag" "$use_policy"
+		config_foreach mwan4_set_sticky_nftables interface "$rule" "$family_flag" "$use_strategy"
 
 		# Only create sticky rule if sticky file was created (i.e., at least one interface matched)
 		if [ -f "${nftTempFile}.rule_${rule}_sticky" ]; then
-			echo "sticky_rule|$rule|$family_flag|$proto_spec|$src_spec|$dest_spec|$ipset_spec|$port_spec|$policy_name|$global_logging|$rule_logging|$loglevel" >> "${nftTempFile}.user_rules"
+			echo "sticky_rule|$rule|$family_flag|$proto_spec|$src_spec|$dest_spec|$ipset_spec|$port_spec|$strategy_name|$global_logging|$rule_logging|$loglevel" >> "${nftTempFile}.user_rules"
 		else
-			# No interfaces matched, fall back to regular rule with policy jump
+			# No interfaces matched, fall back to regular rule with strategy jump
 			echo "regular_rule|$rule|$family_flag|$proto_spec|$src_spec|$dest_spec|$ipset_spec|$port_spec|$mark_action|$global_logging|$rule_logging|$loglevel" >> "${nftTempFile}.user_rules"
 		fi
 	else
@@ -1273,7 +1275,7 @@ mwan4_set_user_iface_rules()
 mwan4_set_user_rules()
 {
 	local family_flag tmpfile error
-	local rule_line action rule fam proto src dest ipset ports mark log_en log_lev
+	local rule_line action rule fam proto src dest ipset ports mark log_en log_lev strategy_name
 	local sticky_file iface sticky_mark sticky_fam
 
 	tmpfile="${nftRulesFile}.tmp"
@@ -1578,14 +1580,14 @@ mwan4_report_iface_status()
 	mwan4_foreach_family "$iface" mwan4_report_iface_status_family
 }
 
-mwan4_report_policies()
+mwan4_report_strategies()
 {
 	local chain="$1"
-	local policy="$2"
+	local strategy="$2"
 
 	local percent total_weight weight iface comment
 
-	# Extract policy info from nftables chain comments
+	# Extract strategy info from nftables chain comments
 	total_weight=$($nft list chain inet ${nftTable} "$chain" 2>/dev/null | \
 		grep -v 'comment "out ' | \
 		grep 'comment' | \
@@ -1593,7 +1595,7 @@ mwan4_report_policies()
 		head -1)
 
 	if [ -n "${total_weight##*[!0-9]*}" ]; then
-		# Load balanced policy
+		# Load balanced strategy
 		$nft list chain inet ${nftTable} "$chain" 2>/dev/null | \
 			grep -v 'comment "out ' | \
 			grep 'comment' | \
@@ -1603,7 +1605,7 @@ mwan4_report_policies()
 				echo " $iface ($percent%)"
 			done
 	else
-		# Single interface policy
+		# Single interface strategy
 		$nft list chain inet ${nftTable} "$chain" 2>/dev/null | \
 			grep -v 'comment "out ' | \
 			grep 'comment' | \
@@ -1613,31 +1615,31 @@ mwan4_report_policies()
 	fi
 }
 
-mwan4_report_policies_v4()
+mwan4_report_strategies_v4()
 {
-	local policy
+	local strategy
 
-	for policy in $($nft list chains inet ${nftTable} 2>/dev/null | \
+	for strategy in $($nft list chains inet ${nftTable} 2>/dev/null | \
 		awk '{print $2}' | \
-		grep "${nftPrefix}_policy_.*_ipv4" | \
+		grep "${nftPrefix}_strategy_.*_ipv4" | \
 		sort -u); do
-		echo "$policy:" | sed "s/${nftPrefix}_policy_//;s/_ipv4//"
-		mwan4_report_policies "$policy" "${policy#${nftPrefix}_policy_}"
+		echo "$strategy:" | sed "s/${nftPrefix}_strategy_//;s/_ipv4//"
+		mwan4_report_strategies "$strategy" "${strategy#${nftPrefix}_strategy_}"
 	done
 }
 
-mwan4_report_policies_v6()
+mwan4_report_strategies_v6()
 {
-	local policy
+	local strategy
 
 	[ $NO_IPV6 -ne 0 ] && return
 
-	for policy in $($nft list chains inet ${nftTable} 2>/dev/null | \
+	for strategy in $($nft list chains inet ${nftTable} 2>/dev/null | \
 		awk '{print $2}' | \
-		grep "${nftPrefix}_policy_.*_ipv6" | \
+		grep "${nftPrefix}_strategy_.*_ipv6" | \
 		sort -u); do
-		echo "$policy:" | sed "s/${nftPrefix}_policy_//;s/_ipv6//"
-		mwan4_report_policies "$policy" "${policy#${nftPrefix}_policy_}"
+		echo "$strategy:" | sed "s/${nftPrefix}_strategy_//;s/_ipv6//"
+		mwan4_report_strategies "$strategy" "${strategy#${nftPrefix}_strategy_}"
 	done
 }
 
@@ -1669,7 +1671,7 @@ mwan4_report_rules_v4()
 		$nft list chain inet ${nftTable} ${nftPrefix}_rules_ipv4 | \
 			grep -E '(counter|comment)' | \
 			sed 's/meta mark.*//' | \
-			sed "s/${nftPrefix}_policy_/- /" | \
+			sed "s/${nftPrefix}_strategy_/- /" | \
 			sed "s/${nftPrefix}_rule_/S /"
 	fi
 }
@@ -1682,7 +1684,7 @@ mwan4_report_rules_v6()
 		$nft list chain inet ${nftTable} ${nftPrefix}_rules_ipv6 | \
 			grep -E '(counter|comment)' | \
 			sed 's/meta mark.*//' | \
-			sed "s/${nftPrefix}_policy_/- /" | \
+			sed "s/${nftPrefix}_strategy_/- /" | \
 			sed "s/${nftPrefix}_rule_/S /"
 	fi
 }

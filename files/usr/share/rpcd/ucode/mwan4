@@ -54,26 +54,26 @@ function get_connected_ips(version) {
 	return ips;
 }
 
-function get_policies(version) {
+function get_strategies(version) {
 	const nftflag = (version == '4') ? 'ipv4' : 'ipv6';
 	const nft = popen('nft -a list chains inet fw4 2>/dev/null', 'r');
-	const policies = {};
+	const strategies = {};
 
-	// First get list of policy chains
-	const policy_chains = [];
+	// First get list of strategy chains
+	const strategy_chains = [];
 	for (let line = nft.read('line'); length(line); line = nft.read('line')) {
-		const m = match(line, /chain mwan4_policy_([^_]+)_(ipv4|ipv6)/);
+		const m = match(line, /chain mwan4_strategy_([^_]+)_(ipv4|ipv6)/);
 		if (m != null && m[2] == nftflag) {
-			push(policy_chains, m[1]);
+			push(strategy_chains, m[1]);
 		}
 	}
 	nft.close();
 
-	// Now get details for each policy chain
-	for (let policy in policy_chains) {
-		const chain_name = sprintf('mwan4_policy_%s_%s', policy, nftflag);
+	// Now get details for each strategy chain
+	for (let strategy in strategy_chains) {
+		const chain_name = sprintf('mwan4_strategy_%s_%s', strategy, nftflag);
 		const chain = popen(sprintf('nft list chain inet fw4 %s 2>/dev/null', chain_name), 'r');
-		policies[policy] = [];
+		strategies[strategy] = [];
 
 		for (let line = chain.read('line'); length(line); line = chain.read('line')) {
 			// Match: meta mark & 0x3f00 == 0 meta mark set 0x0300 comment "wan 3 3"
@@ -83,7 +83,7 @@ function get_policies(version) {
 				const weight = int(m[2]);
 				const total = int(m[3]);
 				if (weight >= 0 && total > 0) {
-					push(policies[policy], {
+					push(strategies[strategy], {
 						'interface': intfw,
 						'percent': weight / total * 100,
 					});
@@ -93,7 +93,7 @@ function get_policies(version) {
 		chain.close();
 	}
 
-	return policies;
+	return strategies;
 }
 
 function interfaces_status(request) {
@@ -188,11 +188,11 @@ function status_call(request) {
 					'ipv6': get_connected_ips('6'),
 				},
 			};
-		case 'policies':
+		case 'strategies':
 			return {
-				'policies': {
-					'ipv4': get_policies('4'),
-					'ipv6': get_policies('6'),
+				'strategies': {
+					'ipv4': get_strategies('4'),
+					'ipv6': get_strategies('6'),
 				},
 			};
 		case 'interfaces':
@@ -206,9 +206,9 @@ function status_call(request) {
 					'ipv4': get_connected_ips('4'),
 					'ipv6': get_connected_ips('6'),
 				},
-				'policies': {
-					'ipv4': get_policies('4'),
-					'ipv6': get_policies('6'),
+				'strategies': {
+					'ipv4': get_strategies('4'),
+					'ipv6': get_strategies('6'),
 				},
 			};
 	}

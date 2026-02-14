@@ -27,7 +27,7 @@ EOF
 	command_help "ifup <iface>" "Load rules and routes for specific interface"
 	command_help "ifdown <iface>" "Unload rules and routes for specific interface"
 	command_help "interfaces" "Show interfaces status"
-	command_help "policies" "Show currently active policy"
+	command_help "strategies" "Show currently active strategy"
 	command_help "connected" "Show directly connected networks"
 	command_help "rules" "Show active rules"
 	command_help "status" "Show all status"
@@ -74,14 +74,14 @@ interfaces()
 	echo
 }
 
-policies()
+strategies()
 {
-	echo "Current ipv4 policies:"
-	mwan4_report_policies_v4
+	echo "Current ipv4 strategies:"
+	mwan4_report_strategies_v4
 	echo
 	[ $NO_IPV6 -ne 0 ] && return
-	echo "Current ipv6 policies:"
-	mwan4_report_policies_v6
+	echo "Current ipv6 strategies:"
+	mwan4_report_strategies_v6
 	echo
 }
 
@@ -110,7 +110,7 @@ rules()
 status()
 {
 	interfaces
-	policies
+	strategies
 	connected
 	rules
 }
@@ -243,7 +243,7 @@ use() {
 }
 
 case "$1" in
-	ifup|ifdown|interfaces|policies|connected|rules|status|start|stop|restart|internal)
+	ifup|ifdown|interfaces|strategies|connected|rules|status|start|stop|restart|internal)
 		mwan4_init
 		"$@"
 	;;

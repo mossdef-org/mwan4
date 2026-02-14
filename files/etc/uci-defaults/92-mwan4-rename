@@ -1,0 +1,56 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Migrate mwan4 config: member->route, policy->strategy,
+# use_member->use_route, use_policy->use_strategy
+
+. /lib/functions.sh
+
+# Migrate 'member' section type to 'route'
+migrate_member() {
+	local name="$1"
+	uci set mwan4."$name"=route
+}
+
+# Migrate 'policy' section type to 'strategy'
+# Also rename use_member list to use_route
+migrate_policy() {
+	local name="$1"
+	local members last_resort
+
+	uci set mwan4."$name"=strategy
+
+	config_get members "$name" use_member
+	if [ -n "$members" ]; then
+		uci_remove mwan4 "$name" use_member
+		for m in $members; do
+			uci_add_list mwan4 "$name" use_route "$m"
+		done
+	fi
+}
+
+# Migrate use_policy option to use_strategy in rules
+# Also migrate 'option family' to 'list family'
+migrate_rule() {
+	local name="$1"
+	local use_policy family
+
+	config_get use_policy "$name" use_policy
+	if [ -n "$use_policy" ]; then
+		uci_remove mwan4 "$name" use_policy
+		uci set mwan4."$name".use_strategy="$use_policy"
+	fi
+
+	config_get family "$name" family
+	if [ -n "$family" ]; then
+		uci_remove mwan4 "$name" family
+		uci_add_list mwan4 "$name" family "$family"
+	fi
+}
+
+config_load mwan4
+config_foreach migrate_member member
+config_foreach migrate_policy policy
+config_foreach migrate_rule rule
+uci_commit mwan4
+
+exit 0

@@ -54,7 +54,7 @@ start_service() {
 	mwan4_set_general_nftables
 	config_foreach mwan4_ifup interface "init"
 	wait $hotplug_pids
-	mwan4_set_policies_nftables
+	mwan4_set_strategies_nftables
 	mwan4_set_user_rules
 
 	# Reload firewall4 to apply nftables configuration

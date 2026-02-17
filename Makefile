@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=mwan4
 PKG_VERSION:=0.1.0
-PKG_RELEASE:=1
+PKG_RELEASE:=3
 PKG_LICENSE:=AGPL-3.0-or-later
 PKG_MAINTAINER:=Stan Grishin <stangri@melmac.ca>
 
@@ -22,15 +22,15 @@ define Package/mwan4
   CONFLICTS:=mwan3
   DEPENDS:= \
     +ip-full \
-    +jshn \
     +jsonfilter \
-    +resolveip \
-    +!BUSYBOX_DEFAULT_AWK:gawk \
-    +!BUSYBOX_DEFAULT_GREP:grep \
-    +!BUSYBOX_DEFAULT_SED:sed \
     +!BUSYBOX_DEFAULT_PING:iputils-ping \
     +kmod-nft-core \
     +kmod-nft-nat \
+    +ucode \
+    +ucode-mod-fs \
+    +ucode-mod-uci \
+    +ucode-mod-ubus \
+    +ucode-mod-uloop \
     +nftables-json \
     +rpcd-mod-ucode
   SUGGESTS:= \
@@ -79,9 +79,19 @@ define Package/mwan4/install
 	$(SED) "s|^\(readonly PKG_VERSION\).*|\1='$(PKG_VERSION)-r$(PKG_RELEASE)'|" $(1)/etc/init.d/mwan4
 
 	$(INSTALL_DIR) $(1)/lib/mwan4
-	$(INSTALL_DATA) ./files/lib/mwan4/common.sh \
+	$(INSTALL_DATA) ./files/lib/mwan4/mwan4.uc \
 		$(1)/lib/mwan4/
-	$(INSTALL_DATA) ./files/lib/mwan4/mwan4.sh \
+	$(INSTALL_DATA) ./files/lib/mwan4/cli.uc \
+		$(1)/lib/mwan4/
+	$(INSTALL_DATA) ./files/lib/mwan4/hotplug_iface.uc \
+		$(1)/lib/mwan4/
+	$(INSTALL_DATA) ./files/lib/mwan4/init_setup.uc \
+		$(1)/lib/mwan4/
+	$(INSTALL_DATA) ./files/lib/mwan4/init_teardown.uc \
+		$(1)/lib/mwan4/
+	$(INSTALL_DATA) ./files/lib/mwan4/mwan4track.uc \
+		$(1)/lib/mwan4/
+	$(INSTALL_DATA) ./files/lib/mwan4/mwan4rtmon.uc \
 		$(1)/lib/mwan4/
 
 	$(INSTALL_DIR) $(1)/usr/share/rpcd/ucode/
@@ -91,9 +101,9 @@ define Package/mwan4/install
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) ./files/usr/sbin/mwan4 \
 		$(1)/usr/sbin/
-	$(INSTALL_BIN) ./files/usr/sbin/mwan4rtmon \
-		$(1)/usr/sbin/
 	$(INSTALL_BIN) ./files/usr/sbin/mwan4track \
+		$(1)/usr/sbin/
+	$(INSTALL_BIN) ./files/usr/sbin/mwan4rtmon \
 		$(1)/usr/sbin/
 
 	$(INSTALL_DIR) $(1)/etc
@@ -104,10 +114,6 @@ define Package/mwan4/install
 
 	$(INSTALL_DIR) $(1)/etc/uci-defaults
 	$(INSTALL_BIN) ./files/etc/uci-defaults/90-mwan4 \
-		$(1)/etc/uci-defaults/
-	$(INSTALL_BIN) ./files/etc/uci-defaults/91-mwan4-nft \
-		$(1)/etc/uci-defaults/
-	$(INSTALL_BIN) ./files/etc/uci-defaults/92-mwan4-rename \
 		$(1)/etc/uci-defaults/
 endef
 

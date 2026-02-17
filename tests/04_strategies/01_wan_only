@@ -1,0 +1,59 @@
+Testing set_strategies_nftables() with wan_only strategy (wan interface online).
+
+-- Testcase --
+import m from 'mwan4';
+m.set_scriptname('test');
+m.init();
+m.update_iface_to_table();
+m.set_iface_hotplug_state('wan', 'online');
+m.set_strategies_nftables();
+print(global.mocklib.read_captured('/usr/share/nftables.d/ruleset-post/13-mwan4-strategies.nft'));
+-- End --
+
+-- Expect stdout --
+table inet fw4 {
+	chain mwan4_strategy_wan_only_ipv4 {
+		meta mark & 0x3f00 == 0 meta mark set 0x100 comment "wan 3 3"
+		meta mark & 0x3f00 == 0 meta mark set 0x3e00 comment "unreachable"
+	}
+	chain mwan4_strategy_wan_only_ipv6 {
+		oifname "eth0" meta mark & 0x3f00 == 0 meta mark set 0x3f00 comment "out wan6 eth0"
+		meta mark & 0x3f00 == 0 meta mark set 0x3e00 comment "unreachable"
+	}
+	chain mwan4_strategy_wanb_only_ipv4 {
+		oifname "eth1" meta mark & 0x3f00 == 0 meta mark set 0x3f00 comment "out wanb eth1"
+		meta mark & 0x3f00 == 0 meta mark set 0x3e00 comment "unreachable"
+	}
+	chain mwan4_strategy_wanb_only_ipv6 {
+		oifname "eth1" meta mark & 0x3f00 == 0 meta mark set 0x3f00 comment "out wanb6 eth1"
+		meta mark & 0x3f00 == 0 meta mark set 0x3e00 comment "unreachable"
+	}
+	chain mwan4_strategy_balanced_ipv4 {
+		meta mark & 0x3f00 == 0 meta mark set 0x100 comment "wan 3 3"
+		meta mark & 0x3f00 == 0 meta mark set 0x3e00 comment "unreachable"
+	}
+	chain mwan4_strategy_balanced_ipv6 {
+		oifname "eth0" meta mark & 0x3f00 == 0 meta mark set 0x3f00 comment "out wan6 eth0"
+		oifname "eth1" meta mark & 0x3f00 == 0 meta mark set 0x3f00 comment "out wanb6 eth1"
+		meta mark & 0x3f00 == 0 meta mark set 0x3e00 comment "unreachable"
+	}
+	chain mwan4_strategy_wan_wanb_ipv4 {
+		meta mark & 0x3f00 == 0 meta mark set 0x100 comment "wan 3 3"
+		meta mark & 0x3f00 == 0 meta mark set 0x3e00 comment "unreachable"
+	}
+	chain mwan4_strategy_wan_wanb_ipv6 {
+		oifname "eth0" meta mark & 0x3f00 == 0 meta mark set 0x3f00 comment "out wan6 eth0"
+		oifname "eth1" meta mark & 0x3f00 == 0 meta mark set 0x3f00 comment "out wanb6 eth1"
+		meta mark & 0x3f00 == 0 meta mark set 0x3e00 comment "unreachable"
+	}
+	chain mwan4_strategy_wanb_wan_ipv4 {
+		meta mark & 0x3f00 == 0 meta mark set 0x100 comment "wan 3 3"
+		meta mark & 0x3f00 == 0 meta mark set 0x3e00 comment "unreachable"
+	}
+	chain mwan4_strategy_wanb_wan_ipv6 {
+		oifname "eth0" meta mark & 0x3f00 == 0 meta mark set 0x3f00 comment "out wan6 eth0"
+		oifname "eth1" meta mark & 0x3f00 == 0 meta mark set 0x3f00 comment "out wanb6 eth1"
+		meta mark & 0x3f00 == 0 meta mark set 0x3e00 comment "unreachable"
+	}
+}
+-- End --

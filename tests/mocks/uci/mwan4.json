@@ -1,0 +1,143 @@
+{
+	"globals": [
+		{
+			".name": "globals",
+			"mmx_mask": "0x3F00"
+		}
+	],
+	"interface": [
+		{
+			".name": "wan",
+			"enabled": "1",
+			"track_ip": ["1.0.0.1", "1.1.1.1", "208.67.222.222", "208.67.220.220"],
+			"family": ["ipv4"],
+			"reliability": "2"
+		},
+		{
+			".name": "wan6",
+			"enabled": "0",
+			"track_ip": ["2606:4700:4700::1001", "2606:4700:4700::1111", "2620:0:ccd::2", "2620:0:ccc::2"],
+			"family": ["ipv6"],
+			"reliability": "2"
+		},
+		{
+			".name": "wanb",
+			"enabled": "0",
+			"track_ip": ["1.0.0.1", "1.1.1.1", "208.67.222.222", "208.67.220.220"],
+			"family": ["ipv4"],
+			"reliability": "1"
+		},
+		{
+			".name": "wanb6",
+			"enabled": "0",
+			"track_ip": ["2606:4700:4700::1001", "2606:4700:4700::1111", "2620:0:ccd::2", "2620:0:ccc::2"],
+			"family": ["ipv6"],
+			"reliability": "1"
+		}
+	],
+	"route": [
+		{
+			".name": "wan_m1_w3",
+			"interface": "wan",
+			"metric": "1",
+			"weight": "3"
+		},
+		{
+			".name": "wan_m2_w3",
+			"interface": "wan",
+			"metric": "2",
+			"weight": "3"
+		},
+		{
+			".name": "wanb_m1_w2",
+			"interface": "wanb",
+			"metric": "1",
+			"weight": "2"
+		},
+		{
+			".name": "wanb_m1_w3",
+			"interface": "wanb",
+			"metric": "1",
+			"weight": "3"
+		},
+		{
+			".name": "wanb_m2_w2",
+			"interface": "wanb",
+			"metric": "2",
+			"weight": "2"
+		},
+		{
+			".name": "wan6_m1_w3",
+			"interface": "wan6",
+			"metric": "1",
+			"weight": "3"
+		},
+		{
+			".name": "wan6_m2_w3",
+			"interface": "wan6",
+			"metric": "2",
+			"weight": "3"
+		},
+		{
+			".name": "wanb6_m1_w2",
+			"interface": "wanb6",
+			"metric": "1",
+			"weight": "2"
+		},
+		{
+			".name": "wanb6_m1_w3",
+			"interface": "wanb6",
+			"metric": "1",
+			"weight": "3"
+		},
+		{
+			".name": "wanb6_m2_w2",
+			"interface": "wanb6",
+			"metric": "2",
+			"weight": "2"
+		}
+	],
+	"strategy": [
+		{
+			".name": "wan_only",
+			"use_route": ["wan_m1_w3", "wan6_m1_w3"]
+		},
+		{
+			".name": "wanb_only",
+			"use_route": ["wanb_m1_w2", "wanb6_m1_w2"]
+		},
+		{
+			".name": "balanced",
+			"use_route": ["wan_m1_w3", "wanb_m1_w3", "wan6_m1_w3", "wanb6_m1_w3"]
+		},
+		{
+			".name": "wan_wanb",
+			"use_route": ["wan_m1_w3", "wanb_m2_w2", "wan6_m1_w3", "wanb6_m2_w2"]
+		},
+		{
+			".name": "wanb_wan",
+			"use_route": ["wan_m2_w3", "wanb_m1_w2", "wan6_m2_w3", "wanb6_m1_w2"]
+		}
+	],
+	"rule": [
+		{
+			".name": "https",
+			"sticky": "1",
+			"dest_port": "443",
+			"proto": "tcp",
+			"use_strategy": "balanced"
+		},
+		{
+			".name": "default_rule_v4",
+			"dest_ip": "0.0.0.0/0",
+			"use_strategy": "balanced",
+			"family": ["ipv4"]
+		},
+		{
+			".name": "default_rule_v6",
+			"dest_ip": "::/0",
+			"use_strategy": "balanced",
+			"family": ["ipv6"]
+		}
+	]
+}

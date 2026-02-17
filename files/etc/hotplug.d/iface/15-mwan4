@@ -1,117 +1,29 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright 2026 MOSSDeF, Stan Grishin (stangri@melmac.ca).
 # Based on original mwan3 by Florian Eckert <fe@dev.tdt.de>
 
-. /lib/functions.sh
-. /lib/functions/network.sh
-. /lib/mwan4/common.sh
-. /lib/mwan4/mwan4.sh
-
-initscript=/etc/init.d/mwan4
-. /lib/functions/procd.sh
-
-SCRIPTNAME="mwan4-hotplug"
 [ "$ACTION" = "ifup" ] || [ "$ACTION" = "ifdown" ] || [ "$ACTION" = "connected" ] || [ "$ACTION" = "disconnected" ] || exit 1
 [ -n "$INTERFACE" ] || exit 2
 [ "$FIRSTCONNECT" = "1" ] || [ "$MWAN4_SHUTDOWN" = "1" ] && exit 0
 
 if { [ "$ACTION" = "ifup" ] || [ "$ACTION" = "connected" ] ; } && [ -z "$DEVICE" ]; then
-	LOG notice "$ACTION called on $INTERFACE with no device set"
+	logger -t 'mwan4-hotplug' -p notice "$ACTION called on $INTERFACE with no device set"
 	exit 3
 fi
 
-[ "$MWAN4_STARTUP" = "init" ] || procd_lock
+initscript=/etc/init.d/mwan4
+. /lib/functions/procd.sh
 
-mwan4_init
+[ "$MWAN4_STARTUP" = "init" ] || procd_lock
 
 /etc/init.d/mwan4 running || {
 	[ "$MWAN4_STARTUP" = "init" ] || procd_unlock
-	LOG notice "mwan4 hotplug $ACTION on $INTERFACE not called because globally disabled"
+	logger -t 'mwan4-hotplug' -p notice "mwan4 hotplug $ACTION on $INTERFACE not called because globally disabled"
 	exit 0
 }
 
-$nft list chain inet ${nftTable} ${nftPrefix}_prerouting &>/dev/null || {
-	LOG warn "hotplug called on $INTERFACE before mwan4 has been set up"
-	exit 0
-}
-
-if [ "$MWAN4_STARTUP" != "init" ] && [ "$ACTION" = "ifup" ]; then
-	mwan4_set_user_iface_rules $INTERFACE $DEVICE
-fi
-
-config_get_bool enabled $INTERFACE 'enabled' '0'
-[ "${enabled}" -eq 1 ] || {
-	LOG notice "mwan4 hotplug on $INTERFACE not called because interface disabled"
-	exit 0
-}
-
-config_get initial_state $INTERFACE initial_state "online"
-if [ "$initial_state" = "offline" ]; then
-	status=offline
-	# Check if any family is online
-	local families family status_iface fam_status
-	mwan4_get_families families "$INTERFACE"
-	for family in $families; do
-		status_iface="${INTERFACE}_${family}"
-		readfile fam_status "$MWAN4TRACK_STATUS_DIR/$status_iface/STATUS" 2>/dev/null || fam_status="unknown"
-		[ "$fam_status" = "online" ] && status=online && break
-	done
-	[ "$status" = "online" ] || status=offline
-else
-	status=online
-fi
-
-LOG notice "Execute $ACTION event on interface $INTERFACE (${DEVICE:-unknown})"
-
-case "$ACTION" in
-	connected)
-		mwan4_set_iface_hotplug_state $INTERFACE "online"
-		mwan4_set_strategies_nftables
-		fw4 -q reload >/dev/null 2>&1 || LOG warn "Failed to reload fw4"
-		;;
-	ifup)
-		mwan4_create_iface_nftables $INTERFACE $DEVICE
-		mwan4_create_iface_rules $INTERFACE $DEVICE
-		mwan4_set_iface_hotplug_state $INTERFACE "$status"
-		if [ "$MWAN4_STARTUP" != "init" ]; then
-			mwan4_create_iface_route $INTERFACE $DEVICE
-			mwan4_set_general_rules
-			if [ "$status" = "online" ]; then
-				mwan4_set_strategies_nftables
-				fw4 -q reload >/dev/null 2>&1 || LOG warn "Failed to reload fw4"
-			fi
-		fi
-		if [ "$ACTION" = ifup ]; then
-			# Signal all family-specific tracking instances
-			local families family
-			mwan4_get_families families "$INTERFACE"
-			for family in $families; do
-				procd_running mwan4 "track_${INTERFACE}_${family}" && procd_send_signal mwan4 "track_${INTERFACE}_${family}" USR2
-			done
-		fi
-		;;
-	disconnected)
-		mwan4_set_iface_hotplug_state $INTERFACE "offline"
-		mwan4_set_strategies_nftables
-		fw4 -q reload >/dev/null 2>&1 || LOG warn "Failed to reload fw4"
-		;;
-	ifdown)
-		mwan4_set_iface_hotplug_state $INTERFACE "offline"
-		mwan4_delete_iface_nftset_entries $INTERFACE
-		mwan4_delete_iface_rules $INTERFACE
-		mwan4_delete_iface_route $INTERFACE
-		mwan4_delete_iface_nftables $INTERFACE
-		# Signal all family-specific tracking instances
-		local families family
-		mwan4_get_families families "$INTERFACE"
-		for family in $families; do
-			procd_running mwan4 "track_${INTERFACE}_${family}" && procd_send_signal mwan4 "track_${INTERFACE}_${family}" USR1
-		done
-		mwan4_set_strategies_nftables
-		fw4 -q reload >/dev/null 2>&1 || LOG warn "Failed to reload fw4"
-	;;
-esac
-
-mwan4_flush_conntrack "$INTERFACE" "$ACTION"
+ACTION="$ACTION" INTERFACE="$INTERFACE" DEVICE="$DEVICE" MWAN4_STARTUP="$MWAN4_STARTUP" \
+	ucode -S -L /lib/mwan4 /lib/mwan4/hotplug_iface.uc
 
 exit 0

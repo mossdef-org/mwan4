@@ -1,11 +1,10 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright 2026 MOSSDeF, Stan Grishin (stangri@melmac.ca).
 # Based on original mwan3 by Florian Eckert <fe@dev.tdt.de>
 
 [ -f "/etc/mwan4.user" ] && {
 	. /lib/functions.sh
-	. /lib/mwan4/common.sh
-	. /lib/mwan4/mwan4.sh
 	initscript=/etc/init.d/mwan4
 	. /lib/functions/procd.sh
 

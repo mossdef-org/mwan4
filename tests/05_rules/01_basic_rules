@@ -1,0 +1,38 @@
+Testing set_user_rules() with default rules (https sticky + default_rule_v4 + default_rule_v6).
+
+-- Testcase --
+import m from 'mwan4';
+m.set_scriptname('test');
+m.init();
+m.update_iface_to_table();
+m.set_user_rules();
+print(global.mocklib.read_captured('/usr/share/nftables.d/ruleset-post/14-mwan4-rules.nft'));
+-- End --
+
+-- Expect stdout --
+table inet fw4 {
+	map mwan4_rule_ipv4_https {
+		typeof ip saddr : meta mark
+		flags timeout
+		timeout 600s
+	}
+	map mwan4_rule_ipv6_https {
+		typeof ip6 saddr : meta mark
+		flags timeout
+		timeout 600s
+	}
+	chain mwan4_rule_https_ipv4 {
+		meta mark & 0x3f00 == 0 meta mark set ip saddr map @mwan4_rule_ipv4_https
+		meta mark & 0x3f00 == 0 jump mwan4_strategy_balanced_ipv4
+		meta mark & 0x3f00 != 0 meta mark & 0x3f00 != 0x3f00 update @mwan4_rule_ipv4_https { ip saddr : meta mark }
+	}
+	chain mwan4_rules_ipv4 {
+		meta l4proto tcp tcp dport { 443 } meta mark & 0x3f00 == 0 jump mwan4_rule_https_ipv4 comment "https"
+		ip daddr 0.0.0.0/0 meta mark & 0x3f00 == 0 jump mwan4_strategy_balanced_ipv4 comment "default_rule_v4"
+	}
+	chain mwan4_rules_ipv6 {
+		meta l4proto tcp tcp dport { 443 } meta mark & 0x3f00 == 0 jump mwan4_strategy_balanced_ipv6 comment "https"
+		ip6 daddr ::/0 meta mark & 0x3f00 == 0 jump mwan4_strategy_balanced_ipv6 comment "default_rule_v6"
+	}
+}
+-- End --

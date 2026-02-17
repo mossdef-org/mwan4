@@ -1,44 +1,100 @@
 #!/bin/sh
 # SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright 2026 MOSSDeF, Stan Grishin (stangri@melmac.ca).
 # Based on original mwan3 by Florian Eckert <fe@dev.tdt.de>
+
+# Migrate mwan3 configuration to mwan4 (one-time migration)
+if [ -f /etc/config/mwan3 ] && [ ! -f /etc/config/mwan3.migrated ]; then
+	[ -f /etc/config/mwan4 ] && mv /etc/config/mwan4 /etc/config/mwan4.default
+	cp /etc/config/mwan3 /etc/config/mwan4
+	mv /etc/config/mwan3 /etc/config/mwan3.migrated
+	logger -t mwan4-migration "Copied /etc/config/mwan3 to /etc/config/mwan4"
+fi
+
+# Migrate mwan4 config terminology and formats:
+# section types: member->route, policy->strategy
+# options: use_member->use_route, use_policy->use_strategy
+# option family -> list family (interfaces and rules)
+# option flush_conntrack 'always'/'never' -> list flush_conntrack
 
 . /lib/functions.sh
 
-mwan4_migrate_flush_conntrack() {
-	local iface="$1"
-
-	config_get value "${iface}" flush_conntrack
-	case $value in
-		always)
-			uci_remove mwan4 "$iface" flush_conntrack
-			uci_add_list mwan4 "$iface" flush_conntrack ifup
-			uci_add_list mwan4 "$iface" flush_conntrack ifdown
-			;;
-		never)
-			uci_remove mwan4 "$iface" flush_conntrack
-			;;
-	esac
-
-	uci_commit mwan4
+# Migrate 'member' section type to 'route'
+migrate_member() {
+	local name="$1"
+	uci_set mwan4 "$name" route
 }
 
-mwan4_migrate_family() {
-	local iface="$1"
+# Migrate 'policy' section type to 'strategy'
+# Also rename use_member list to use_route
+migrate_policy() {
+	local name="$1"
+	local members
+
+	uci_set mwan4 "$name" strategy
+
+	config_get members "$name" use_member
+	if [ -n "$members" ]; then
+		uci_rename mwan4 "$name" use_member use_route
+	fi
+}
+
+# Migrate 'option family' to 'list family'
+migrate_family() {
+	local name="$1"
 	local family
 
-	# Check if using old 'option family' format
-	config_get family "${iface}" family
+	config_get family "$name" family
 	if [ -n "$family" ]; then
-		# Convert to new 'list family' format
-		uci_remove mwan4 "$iface" family
-		uci_add_list mwan4 "$iface" family "$family"
+		uci_remove mwan4 "$name" family
+		uci_add_list mwan4 "$name" family "$family"
+	fi
+}
+
+# Migrate flush_conntrack from option to list
+migrate_flush_conntrack() {
+	local name="$1"
+	local value
+
+	config_get value "$name" flush_conntrack
+	case $value in
+		always)
+			uci_remove mwan4 "$name" flush_conntrack
+			uci_add_list mwan4 "$name" flush_conntrack ifup
+			uci_add_list mwan4 "$name" flush_conntrack ifdown
+			;;
+		never)
+			uci_remove mwan4 "$name" flush_conntrack
+			;;
+	esac
+}
+
+# Migrate use_policy option to use_strategy in rules
+# Also migrate 'option family' to 'list family'
+migrate_rule() {
+	local name="$1"
+	local use_policy
+
+	config_get use_policy "$name" use_policy
+	if [ -n "$use_policy" ]; then
+		uci_rename mwan4 "$name" use_policy use_strategy
 	fi
 
-	uci_commit mwan4
+	migrate_family "$name"
+}
+
+# Migrate interface options
+migrate_interface() {
+	local name="$1"
+	migrate_family "$name"
+	migrate_flush_conntrack "$name"
 }
 
 config_load mwan4
-config_foreach mwan4_migrate_flush_conntrack interface
-config_foreach mwan4_migrate_family interface
+config_foreach migrate_member member
+config_foreach migrate_policy policy
+config_foreach migrate_rule rule
+config_foreach migrate_interface interface
+uci_commit mwan4
 
 exit 0

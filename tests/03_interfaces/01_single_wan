@@ -1,0 +1,26 @@
+Testing rebuild_iface_nftfile() with single enabled WAN interface (IPv4).
+
+-- Testcase --
+import m from 'mwan4';
+m.set_scriptname('test');
+m.init();
+m.update_iface_to_table();
+m.rebuild_iface_nftfile();
+print(global.mocklib.read_captured('/usr/share/nftables.d/ruleset-post/12-mwan4-interfaces.nft'));
+-- End --
+
+-- Expect stdout --
+table inet fw4 {
+
+	chain mwan4_iface_in_wan_ipv4 {
+		iifname "eth0" ip saddr @mwan4_custom_ipv4 meta mark & 0x3f00 == 0 meta mark set 0x3f00 comment "default"
+		iifname "eth0" ip saddr @mwan4_connected_ipv4 meta mark & 0x3f00 == 0 meta mark set 0x3f00 comment "default"
+		iifname "eth0" ip saddr @mwan4_dynamic_ipv4 meta mark & 0x3f00 == 0 meta mark set 0x3f00 comment "default"
+		iifname "eth0" meta mark & 0x3f00 == 0 meta mark set 0x100 comment "wan"
+	}
+
+	chain mwan4_ifaces_in {
+		meta mark & 0x3f00 == 0 ip jump mwan4_iface_in_wan_ipv4
+	}
+}
+-- End --

@@ -1,0 +1,25 @@
+Testing set_connected_ipv4() with default config and mock route table.
+
+-- Testcase --
+import m from 'mwan4';
+m.set_scriptname('test');
+m.init();
+m.begin_set_accumulation();
+m.set_connected_ipv4();
+m.install_sets_nftfile();
+print(global.mocklib.read_captured('/usr/share/nftables.d/ruleset-post/11-mwan4-sets.nft'));
+-- End --
+
+-- Expect stdout --
+table inet fw4 {
+	set mwan4_connected_ipv4 {
+		type ipv4_addr
+		flags interval
+		auto-merge
+		elements = {
+			192.168.1.0/24,
+			224.0.0.0/3
+		}
+	}
+}
+-- End --

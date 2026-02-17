@@ -1,175 +1,89 @@
 'use strict';
 // SPDX-License-Identifier: AGPL-3.0-or-later
+// Copyright 2026 MOSSDeF, Stan Grishin (stangri@melmac.ca).
 // Based on original mwan3 by Florian Eckert <fe@dev.tdt.de>
 
-import { popen, readfile } from 'fs';
-import { cursor } from 'uci';
+push(REQUIRE_SEARCH_PATH, '/lib/mwan4/*.uc');
+import m from 'mwan4';
 
-const ubus = require('ubus').connect();
+m.set_scriptname('rpcd-mwan4');
+m.init();
 
-function get_str_raw(iface, property) {
-	return readfile(sprintf('/var/run/mwan4track/%s/%s', iface, property));
-}
-
-function get_str(iface, property) {
-	return rtrim(get_str_raw(iface, property), '\n');
-}
-
-function get_int(iface, property) {
-	return int(get_str(iface, property));
-}
-
-function get_connected_ips(version) {
-	// Check if nftables set exists
-	const nftflag = (version == '4') ? 'ip' : 'ip6';
-	const check = popen(sprintf('nft list set inet fw4 mwan4_connected_ipv%s 2>/dev/null', version), 'r');
-	const output = check.read('all');
-	check.close();
-
-	if (!length(output)) {
-		return [];
-	}
-
-	// Extract IPs from nftables set
-	const ips = [];
-	const lines = split(output, '\n');
-	let in_elements = false;
-	for (let line in lines) {
-		line = trim(line);
-		if (match(line, /elements = \{/)) {
-			in_elements = true;
-			continue;
-		}
-		if (in_elements && match(line, /\}/)) {
-			break;
-		}
-		if (in_elements && length(line) > 0) {
-			// Remove trailing comma and whitespace
-			line = replace(line, /[,\s]+$/, '');
-			if (length(line) > 0) {
-				push(ips, line);
-			}
+function get_strategies(family) {
+	let data = m.get_strategies_data(family);
+	let result = {};
+	for (let name in keys(data)) {
+		result[name] = [];
+		for (let e in data[name]) {
+			if (e.total > 0)
+				push(result[name], {
+					'interface': e.iface,
+					'percent': e.weight / e.total * 100,
+				});
 		}
 	}
-	return ips;
-}
-
-function get_strategies(version) {
-	const nftflag = (version == '4') ? 'ipv4' : 'ipv6';
-	const nft = popen('nft -a list chains inet fw4 2>/dev/null', 'r');
-	const strategies = {};
-
-	// First get list of strategy chains
-	const strategy_chains = [];
-	for (let line = nft.read('line'); length(line); line = nft.read('line')) {
-		const m = match(line, /chain mwan4_strategy_([^_]+)_(ipv4|ipv6)/);
-		if (m != null && m[2] == nftflag) {
-			push(strategy_chains, m[1]);
-		}
-	}
-	nft.close();
-
-	// Now get details for each strategy chain
-	for (let strategy in strategy_chains) {
-		const chain_name = sprintf('mwan4_strategy_%s_%s', strategy, nftflag);
-		const chain = popen(sprintf('nft list chain inet fw4 %s 2>/dev/null', chain_name), 'r');
-		strategies[strategy] = [];
-
-		for (let line = chain.read('line'); length(line); line = chain.read('line')) {
-			// Match: meta mark & 0x3f00 == 0 meta mark set 0x0300 comment "wan 3 3"
-			const m = match(line, /comment "([^ ]+) ([0-9]+) ([0-9]+)"/);
-			if (m != null) {
-				const intfw = m[1];
-				const weight = int(m[2]);
-				const total = int(m[3]);
-				if (weight >= 0 && total > 0) {
-					push(strategies[strategy], {
-						'interface': intfw,
-						'percent': weight / total * 100,
-					});
-				}
-			}
-		}
-		chain.close();
-	}
-
-	return strategies;
+	return result;
 }
 
 function interfaces_status(request) {
-	function get_uptime() {
-		return int(split(readfile('/proc/uptime'), '.', 2)[0]);
-	}
+	let uptime = m.get_uptime();
+	let procd = m.ubus_call('service', 'list', { 'name': 'mwan4' })?.mwan4?.instances;
+	let interfaces = {};
 
-	function get_x_time(uptime, iface, property) {
-		let t = get_int(iface, property);
-		if (t > 0) {
-			t = uptime - t;
-		}
-		return t;
-	}
-
-	function ucibool(val) {
-		switch (val) {
-			case 'yes':
-			case 'on':
-			case 'true':
-			case 'enabled':
-				return true;
-			default:
-				return !!int(val);
-		}
-	}
-
-	function get_mwan4track_status(iface, uci_track_ips, procd) {
-		if (length(uci_track_ips) == 0) {
-			return 'disabled';
-		}
-		if (procd?.[sprintf('track_%s', iface)]?.running) {
-			const started = get_str(iface, 'STARTED');
-			switch (started) {
-				case '0':
-					return 'paused';
-				case '1':
-					return 'active';
-				default:
-					return 'down';
-			}
-		}
-		return 'down';
-	}
-
-	const uci = cursor();
-	const procd = ubus.call('service', 'list', { 'name': 'mwan4' })?.mwan4?.instances;
-	const interfaces = {};
-	uci.foreach('mwan4', 'interface', intf => {
-		const ifname = intf['.name'];
-		if (request.args.interface != null && request.args.interface != ifname) {
+	m.uci_foreach('interface', function(intf) {
+		let ifname = intf['.name'];
+		if (request.args.interface != null && request.args.interface != ifname)
 			return;
+
+		let families = m.get_families(ifname);
+		let primary_si = ifname + '_' + (families[0] || 'ipv4');
+
+		let netstatus = m.ubus_call(sprintf('network.interface.%s', ifname), 'status');
+		let uci_track_ips = intf['track_ip'];
+		let track_status;
+
+		if (!length(uci_track_ips)) {
+			track_status = 'disabled';
+		} else if (procd?.[sprintf('track_%s', primary_si)]?.running) {
+			let started = m.read_str(sprintf('%s/%s/STARTED', m.TRACK_STATUS_DIR, primary_si)) || '';
+			switch (started) {
+				case '0': track_status = 'paused'; break;
+				case '1': track_status = 'active'; break;
+				default:  track_status = 'down'; break;
+			}
+		} else {
+			track_status = 'down';
 		}
-		const netstatus = ubus.call(sprintf('network.interface.%s', ifname), 'status', {});
-		const uptime = get_uptime();
-		const uci_track_ips = intf['track_ip'];
-		const track_status = get_mwan4track_status(ifname, uci_track_ips, procd);
-		const track_ips = [];
+
+		let track_ips = [];
 		for (let ip in uci_track_ips) {
 			push(track_ips, {
 				'ip': ip,
-				'status': get_str(ifname, sprintf('TRACK_%s', ip)) || 'unknown',
-				'latency': get_int(ifname, sprintf('LATENCY_%s', ip)),
-				'packetloss': get_int(ifname, sprintf('LOSS_%s', ip)),
+				'status': m.read_str(sprintf('%s/%s/TRACK_%s', m.TRACK_STATUS_DIR, primary_si, ip)) || 'unknown',
+				'latency': m.read_int(sprintf('%s/%s/LATENCY_%s', m.TRACK_STATUS_DIR, primary_si, ip)),
+				'packetloss': m.read_int(sprintf('%s/%s/LOSS_%s', m.TRACK_STATUS_DIR, primary_si, ip)),
 			});
 		}
+
+		// Aggregate STATUS across families: online if any family is online
+		let overall_status = 'unknown';
+		for (let family in families) {
+			let si = ifname + '_' + family;
+			let st = m.read_str(sprintf('%s/%s/STATUS', m.TRACK_STATUS_DIR, si)) || 'unknown';
+			if (st == 'online') { overall_status = 'online'; break; }
+			if (st == 'offline') overall_status = 'offline';
+		}
+
 		interfaces[ifname] = {
-			'age': get_x_time(uptime, ifname, 'TIME'),
-			'online': get_x_time(uptime, ifname, 'ONLINE'),
-			'offline': get_x_time(uptime, ifname, 'OFFLINE'),
+			'age': uptime - m.read_int(sprintf('%s/%s/TIME', m.TRACK_STATUS_DIR, primary_si)),
+			'online': uptime - m.read_int(sprintf('%s/%s/ONLINE', m.TRACK_STATUS_DIR, primary_si)),
+			'offline': uptime - m.read_int(sprintf('%s/%s/OFFLINE', m.TRACK_STATUS_DIR, primary_si)),
 			'uptime': netstatus?.uptime || 0,
-			'score': get_int(ifname, 'SCORE'),
-			'lost': get_int(ifname, 'LOST'),
-			'turn': get_int(ifname, 'TURN'),
-			'status': get_str(ifname, 'STATUS') || 'unknown',
-			'enabled': ucibool(intf['enabled']),
+			'score': m.read_int(sprintf('%s/%s/SCORE', m.TRACK_STATUS_DIR, primary_si)),
+			'lost': m.read_int(sprintf('%s/%s/LOST', m.TRACK_STATUS_DIR, primary_si)),
+			'turn': m.read_int(sprintf('%s/%s/TURN', m.TRACK_STATUS_DIR, primary_si)),
+			'status': overall_status,
+			'enabled': m.uci_bool(intf['enabled']),
 			'running': track_status == 'active',
 			'tracking': track_status,
 			'up': netstatus?.up || false,
@@ -184,15 +98,15 @@ function status_call(request) {
 		case 'connected':
 			return {
 				'connected': {
-					'ipv4': get_connected_ips('4'),
-					'ipv6': get_connected_ips('6'),
+					'ipv4': m.report_connected('ipv4'),
+					'ipv6': m.report_connected('ipv6'),
 				},
 			};
 		case 'strategies':
 			return {
 				'strategies': {
-					'ipv4': get_strategies('4'),
-					'ipv6': get_strategies('6'),
+					'ipv4': get_strategies('ipv4'),
+					'ipv6': get_strategies('ipv6'),
 				},
 			};
 		case 'interfaces':
@@ -203,12 +117,12 @@ function status_call(request) {
 			return {
 				'interfaces': interfaces_status(request),
 				'connected': {
-					'ipv4': get_connected_ips('4'),
-					'ipv6': get_connected_ips('6'),
+					'ipv4': m.report_connected('ipv4'),
+					'ipv6': m.report_connected('ipv6'),
 				},
 				'strategies': {
-					'ipv4': get_strategies('4'),
-					'ipv6': get_strategies('6'),
+					'ipv4': get_strategies('ipv4'),
+					'ipv6': get_strategies('ipv6'),
 				},
 			};
 	}

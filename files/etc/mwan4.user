@@ -18,4 +18,4 @@
 #               Note: On an ifdown event, $DEVICE is not available, use $INTERFACE instead.
 #
 # Further documentation can be found here:
-# https://github.com/stangri/mwan4/
+# https://docs.openwrt.melmac.ca/mwan4/

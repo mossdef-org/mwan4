@@ -1307,7 +1307,7 @@ function report_iface_status() {
 					if (index(cmd_output(sprintf('%s route list table %d default dev %s 2>/dev/null', ip_cmd, id, device)), 'default') < 0)
 						err += 16;
 				}
-				detail = err ? '' + err : null;
+				detail = err ? '' + err : '';
 			}
 
 			let msg;

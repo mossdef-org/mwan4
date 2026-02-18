@@ -199,7 +199,7 @@ function cmd_use(args) {
 		return 1;
 	}
 	let family = m.uci_get(iface, 'family') || 'ipv4';
-	let fwmark = m.mmx_default() || '';
+	let fwmark = m.mmx_default();
 
 	let quoted_args = map(args, shell_quote);
 	let cmd = sprintf(

@@ -1,4 +1,4 @@
-let mocklib = global.mocklib;
+let mocklib = global.mocklib; // ucode-lsp disable
 
 return {
 	readfile: function(path, limit) {

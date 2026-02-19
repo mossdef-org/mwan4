@@ -216,5 +216,25 @@ for catdir in tests/[0-9][0-9]_*; do
 	done
 done
 
+# ── Shell script syntax checks ──────────────────────────────────────
+
+printf "\n##\n## Checking shell script syntax\n##\n\n"
+for shellscript in \
+	files/etc/init.d/* \
+	files/etc/uci-defaults/*; do
+	[ -f "$shellscript" ] || continue
+	head -1 "$shellscript" | grep -q '^#!/bin/sh' || continue
+	name="${shellscript#files/}"
+	n_tests=$((n_tests + 1))
+	printf "%s %s " "$name" "${line:${#name}}"
+	if sh -n "$shellscript" 2>/dev/null; then
+		printf "OK\n"
+	else
+		printf "FAIL\n"
+		sh -n "$shellscript"
+		n_fails=$((n_fails + 1))
+	fi
+done
+
 printf "\nRan %d tests, %d okay, %d failures\n" $n_tests $((n_tests - n_fails)) $n_fails
 exit $n_fails

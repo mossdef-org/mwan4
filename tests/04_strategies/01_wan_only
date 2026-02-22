@@ -6,8 +6,10 @@ m.set_scriptname('test');
 m.init();
 m.update_iface_to_table();
 m.set_iface_hotplug_state('wan', 'online');
+m.nft_file('create', 'dynamic');
 m.set_strategies_nftables();
-print(global.mocklib.read_captured('/usr/share/nftables.d/ruleset-post/13-mwan4-strategies.nft'));
+m.nft_file('install', 'dynamic');
+print(global.mocklib.read_captured('/usr/share/nftables.d/ruleset-post/10-mwan4.nft'));
 -- End --
 
 -- Expect stdout --

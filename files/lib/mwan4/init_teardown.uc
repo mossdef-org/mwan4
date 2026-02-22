@@ -5,7 +5,6 @@
 //
 // Called by init.d/mwan4 stop_service to tear down nftables, routes and rules.
 
-import { unlink } from 'fs';
 import m from 'mwan4';
 
 m.set_scriptname('mwan4-init');
@@ -46,8 +45,7 @@ for (let family in ['ipv4', 'ipv6']) {
 }
 
 // Remove nftables include and temp files (fw4 reload is triggered by service_stopped)
-for (let f in [m.NFT_BASE_FILE, m.NFT_SETS_FILE, m.NFT_IFACE_FILE, m.NFT_STRATEGY_FILE, m.NFT_RULES_FILE])
-	unlink(f);
+m.nft_file('delete', 'all');
 system('rm -f /var/run/mwan4.nft*');
 
 // Remove status directories

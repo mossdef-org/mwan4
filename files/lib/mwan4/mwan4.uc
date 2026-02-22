@@ -6,6 +6,10 @@
 import { readfile, writefile, popen, stat, unlink } from 'fs';
 import { cursor } from 'uci';
 
+// Forward declaration — defined later but referenced by the export block.
+// ucode does not hoist function declarations.
+let rebuild_dynamic;
+
 // ── Constants ────────────────────────────────────────────────────────
 
 const STATUS_DIR = '/var/run/mwan4';
@@ -19,11 +23,12 @@ const NFT_PREFIX = 'mwan4';
 const NFT_IPV4 = 'ip';
 const NFT_IPV6 = 'ip6';
 const NFT_TEMP = '/var/run/mwan4.nft';
-const NFT_BASE_FILE = '/usr/share/nftables.d/ruleset-post/10-mwan4-base.nft';
-const NFT_SETS_FILE = '/usr/share/nftables.d/ruleset-post/11-mwan4-sets.nft';
-const NFT_IFACE_FILE = '/usr/share/nftables.d/ruleset-post/12-mwan4-interfaces.nft';
-const NFT_STRATEGY_FILE = '/usr/share/nftables.d/ruleset-post/13-mwan4-strategies.nft';
-const NFT_RULES_FILE = '/usr/share/nftables.d/ruleset-post/14-mwan4-rules.nft';
+
+// 2-file architecture: dynamic (rebuilt on hotplug) + rules (init only)
+const NFT_FILES = {
+	dynamic: '/usr/share/nftables.d/ruleset-post/10-mwan4.nft',
+	rules:   '/usr/share/nftables.d/ruleset-post/11-mwan4-rules.nft',
+};
 
 const IPv4_RE = /^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\/[0-9]+)?$/;
 const IPv6_RE = /^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}(\/[0-9]+)?$/;
@@ -44,8 +49,14 @@ let iface_max = 0;
 let iface_tbl = {};
 let dev_tbl = { ipv4: {}, ipv6: {} };
 let source_routing = false;
-let _sets_nft_lines = [];
-let _sets_accumulate = false;
+
+// ── Structured Status ────────────────────────────────────────────────
+
+let status = {
+	errors: [],
+	warnings: [],
+	reset: function() { this.errors = []; this.warnings = []; },
+};
 
 // ── Utility Functions ────────────────────────────────────────────────
 
@@ -83,10 +94,6 @@ function read_int(path) {
 	return int(read_str(path) || '0');
 }
 
-function write_str(path, data) {
-	writefile(path, data);
-}
-
 function ensure_dir(path) {
 	if (!stat(path))
 		system(sprintf("mkdir -p '%s'", path));
@@ -96,51 +103,147 @@ function file_exists(path) {
 	return !!stat(path);
 }
 
-function rm(path) {
-	unlink(path);
-}
+// ── nft_file Dispatcher ──────────────────────────────────────────────
+// IIFE encapsulates private state (targets map) and helpers (check, apply,
+// install_all, install_targets).  Only the returned dispatcher is visible.
 
-function nft_file(command, tmpfile, destfile) {
-	let err;
-	switch (command) {
-	case 'check':
-		err = trim(cmd_output(sprintf('nft -c -f %s 2>&1', tmpfile)));
+let nft_file = (function() {
+	let targets = {};
+
+	function check(filepath) {
+		let err = trim(cmd_output(sprintf('nft -c -f %s 2>&1', filepath)));
 		if (length(err)) {
-			LOG('error', 'nft check failed for', tmpfile + ':', err);
+			push(status.errors, { code: 'errorNftCheck', info: filepath + ': ' + err });
+			LOG('error', 'nft check failed for', filepath + ':', err);
 			return false;
 		}
-		return true;
-	case 'apply':
-		if (!nft_file('check', tmpfile))
-			return false;
-		err = trim(cmd_output(sprintf('nft -f %s 2>&1', tmpfile)));
-		if (length(err)) {
-			LOG('error', 'nft -f', tmpfile + ':', err);
-			return false;
-		}
-		return true;
-	case 'install':
-		// No nft -c -f check here: individual files have cross-file chain
-		// references (e.g. rules file references strategy chains) that only
-		// resolve when fw4 loads all include files together.
-		let content = readfile(tmpfile);
-		if (!content) {
-			LOG('error', 'Cannot read temp file', tmpfile);
-			return false;
-		}
-		// Ensure parent directory exists
-		let dir = match(destfile, /^(.+)\//);
-		if (dir) ensure_dir(dir[1]);
-		writefile(destfile, content);
-		LOG('info', 'Installed nft file to', destfile);
 		return true;
 	}
-}
+
+	function apply(filepath) {
+		if (!check(filepath))
+			return false;
+		let err = trim(cmd_output(sprintf('nft -f %s 2>&1', filepath)));
+		if (length(err)) {
+			push(status.errors, { code: 'errorNftApply', info: filepath + ': ' + err });
+			LOG('error', 'nft -f', filepath + ':', err);
+			return false;
+		}
+		return true;
+	}
+
+	function install_all() {
+		let dest_dir = match(NFT_FILES.dynamic, /^(.+)\//);
+		if (dest_dir) ensure_dir(dest_dir[1]);
+
+		let combined_content = '';
+		let has_content = false;
+		for (let target in keys(NFT_FILES)) {
+			let lines = targets[target];
+			if (!lines || !length(lines)) continue;
+			has_content = true;
+			combined_content += join('\n', lines) + '\n\n';
+		}
+
+		if (!has_content) return true;
+
+		let combined = NFT_TEMP + '.combined';
+		writefile(combined, combined_content);
+		let err = trim(cmd_output(sprintf('nft -c -f %s 2>&1', combined)));
+		unlink(combined);
+		if (length(err)) {
+			push(status.errors, { code: 'errorNftCombinedCheck', info: err });
+			LOG('error', 'Combined nft validation failed:', err);
+			return false;
+		}
+
+		for (let target in keys(NFT_FILES)) {
+			let lines = targets[target];
+			if (!lines || !length(lines)) continue;
+			writefile(NFT_FILES[target], join('\n', lines) + '\n');
+			LOG('info', 'Installed nft file to', NFT_FILES[target]);
+		}
+		return true;
+	}
+
+	function install_targets(changed) {
+		let dest_dir = match(NFT_FILES.dynamic, /^(.+)\//);
+		if (dest_dir) ensure_dir(dest_dir[1]);
+
+		let combined_content = '';
+		for (let target in keys(NFT_FILES)) {
+			if (index(changed, target) >= 0 && targets[target] && length(targets[target])) {
+				combined_content += join('\n', targets[target]) + '\n\n';
+			} else {
+				let existing = readfile(NFT_FILES[target]);
+				if (existing)
+					combined_content += existing + '\n';
+			}
+		}
+
+		let combined = NFT_TEMP + '.combined';
+		writefile(combined, combined_content);
+		let err = trim(cmd_output(sprintf('nft -c -f %s 2>&1', combined)));
+		unlink(combined);
+		if (length(err)) {
+			push(status.errors, { code: 'errorNftCombinedCheck', info: err });
+			LOG('error', 'Combined nft validation failed:', err);
+			return false;
+		}
+
+		for (let target in changed) {
+			let lines = targets[target];
+			if (!lines || !length(lines)) continue;
+			writefile(NFT_FILES[target], join('\n', lines) + '\n');
+			LOG('info', 'Installed nft file to', NFT_FILES[target]);
+		}
+		return true;
+	}
+
+	return function(command, target, ...extra) {
+		switch (command) {
+		case 'create':
+			targets[target] = [];
+			break;
+		case 'add':
+			if (!targets[target]) targets[target] = [];
+			for (let line in extra)
+				push(targets[target], line);
+			break;
+		case 'install':
+			if (target == 'all')
+				return install_all();
+			return install_targets(type(target) == 'array' ? target : [target]);
+		case 'check':
+			return check(target);
+		case 'apply':
+			return apply(target);
+		case 'delete':
+			if (target == 'all') {
+				for (let t in keys(NFT_FILES)) unlink(NFT_FILES[t]);
+				targets = {};
+			} else if (NFT_FILES[target]) {
+				unlink(NFT_FILES[target]);
+				delete targets[target];
+			}
+			break;
+		case 'exists': {
+			let s = stat(NFT_FILES[target]);
+			return s != null && s.size > 0;
+		}
+		case 'show':
+			return readfile(NFT_FILES[target]) || '';
+		}
+		return true;
+	};
+})();
 
 function fw4_reload() {
 	let rc = system('fw4 -q reload 2>/dev/null');
-	if (rc != 0)
+	if (rc != 0) {
+		push(status.errors, { code: 'errorFw4Reload', info: 'fw4 reload exit code ' + rc });
 		LOG('error', 'fw4 reload failed');
+	}
 	return rc == 0;
 }
 
@@ -424,7 +527,7 @@ function get_routes(family) {
 // ── Hotplug State ────────────────────────────────────────────────────
 
 function set_iface_hotplug_state(iface, state) {
-	write_str(sprintf('%s/iface_state/%s', STATUS_DIR, iface), state);
+	writefile(sprintf('%s/iface_state/%s', STATUS_DIR, iface), state);
 }
 
 function get_iface_hotplug_state(iface) {
@@ -455,13 +558,13 @@ function init(name) {
 	if (!mmx_mask) {
 		mmx_mask = uci_get('globals', 'mmx_mask') || '0x3F00';
 		mmx_mask = lc(mmx_mask);
-		write_str(STATUS_DIR + '/mmx_mask', mmx_mask);
+		writefile(STATUS_DIR + '/mmx_mask', mmx_mask);
 		LOG('debug', 'Using firewall mask', mmx_mask);
 
 		let bitcnt = count_one_bits(mmx_mask);
 		let mmdefault = (1 << bitcnt) - 1;
 		iface_max = mmdefault - 3;
-		write_str(STATUS_DIR + '/iface_max', '' + iface_max);
+		writefile(STATUS_DIR + '/iface_max', '' + iface_max);
 		LOG('debug', 'Max interface count is', '' + iface_max);
 	}
 
@@ -475,35 +578,6 @@ function init(name) {
 	mmx_unreachable = id2mask(mm_unreachable, mmx_mask);
 
 	source_routing = uci_get_bool('globals', 'source_routing', false);
-}
-
-// ── nftables Set Accumulation ────────────────────────────────────────
-
-function _accumulate_set_lines(lines) {
-	if (!_sets_accumulate) return;
-	for (let i = 1; i < length(lines) - 1; i++)
-		push(_sets_nft_lines, lines[i]);
-}
-
-function begin_set_accumulation() {
-	_sets_nft_lines = [];
-	_sets_accumulate = true;
-}
-
-function install_sets_nftfile() {
-	if (!length(_sets_nft_lines)) {
-		_sets_accumulate = false;
-		return;
-	}
-	let combined = [sprintf('table inet %s {', NFT_TABLE)];
-	push(combined, ..._sets_nft_lines);
-	push(combined, '}');
-	let tmpfile = NFT_TEMP + '.sets_combined';
-	writefile(tmpfile, join('\n', combined) + '\n');
-	nft_file('install', tmpfile, NFT_SETS_FILE);
-	rm(tmpfile);
-	_sets_nft_lines = [];
-	_sets_accumulate = false;
 }
 
 // ── General IP Rules ─────────────────────────────────────────────────
@@ -631,11 +705,7 @@ function set_general_nftables() {
 
 	push(L, '}');
 
-	let tmpfile = NFT_TEMP + '.base';
-	write_str(tmpfile, join('\n', L) + '\n');
-	if (!nft_file('install', tmpfile, NFT_BASE_FILE))
-		LOG('error', 'Failed to install base nftables structure');
-	rm(tmpfile);
+	nft_file('add', 'dynamic', ...L);
 }
 
 // ── nftables Sets ────────────────────────────────────────────────────
@@ -689,10 +759,10 @@ function set_custom_nftset() {
 
 	push(lines, '}');
 	let tmpfile = NFT_TEMP + '.custom_sets';
-	write_str(tmpfile, join('\n', lines) + '\n');
+	writefile(tmpfile, join('\n', lines) + '\n');
 	nft_file('apply', tmpfile);
-	_accumulate_set_lines(lines);
-	rm(tmpfile);
+	unlink(tmpfile);
+	nft_file('add', 'rules', ...lines);
 }
 
 function set_connected_ipv4() {
@@ -729,10 +799,10 @@ function set_connected_ipv4() {
 	push(lines, '\t\t}', '\t}', '}');
 
 	let tmpfile = NFT_TEMP + '.connected_v4';
-	write_str(tmpfile, join('\n', lines) + '\n');
+	writefile(tmpfile, join('\n', lines) + '\n');
 	nft_file('apply', tmpfile);
-	_accumulate_set_lines(lines);
-	rm(tmpfile);
+	unlink(tmpfile);
+	nft_file('add', 'rules', ...lines);
 }
 
 function set_connected_ipv6() {
@@ -759,10 +829,10 @@ function set_connected_ipv6() {
 	push(lines, '\t\t}', '\t}', '}');
 
 	let tmpfile = NFT_TEMP + '.connected_v6';
-	write_str(tmpfile, join('\n', lines) + '\n');
+	writefile(tmpfile, join('\n', lines) + '\n');
 	nft_file('apply', tmpfile);
-	_accumulate_set_lines(lines);
-	rm(tmpfile);
+	unlink(tmpfile);
+	nft_file('add', 'rules', ...lines);
 }
 
 function set_dynamic_nftset() {
@@ -786,10 +856,10 @@ function set_dynamic_nftset() {
 	push(lines, '}');
 
 	let tmpfile = NFT_TEMP + '.dynamic_init';
-	write_str(tmpfile, join('\n', lines) + '\n');
+	writefile(tmpfile, join('\n', lines) + '\n');
 	nft_file('apply', tmpfile);
-	_accumulate_set_lines(lines);
-	rm(tmpfile);
+	unlink(tmpfile);
+	nft_file('add', 'rules', ...lines);
 }
 
 // ── nftables Interfaces ──────────────────────────────────────────────
@@ -831,10 +901,7 @@ function rebuild_iface_nftfile() {
 
 	push(L, '}');
 
-	let tmpfile = NFT_TEMP + '.ifaces';
-	write_str(tmpfile, join('\n', L) + '\n');
-	nft_file('install', tmpfile, NFT_IFACE_FILE);
-	rm(tmpfile);
+	nft_file('add', 'dynamic', ...L);
 }
 
 // ── nftables Strategies ──────────────────────────────────────────────
@@ -844,6 +911,7 @@ function _create_strategy_chain(strategy_name, accumulator) { // ucode-lsp disab
 	let last_resort_mark;
 
 	if (length(strategy_name) > 15) {
+		push(status.warnings, { code: 'warningStrategyNameTooLong', info: strategy_name });
 		LOG('warn', sprintf('Strategy %s exceeds 15 chars, skipping', strategy_name));
 		return;
 	}
@@ -942,14 +1010,11 @@ function set_strategies_nftables() {
 
 	if (!length(all_lines)) return;
 
-	let combined = [sprintf('table inet %s {', NFT_TABLE)];
-	push(combined, ...all_lines);
-	push(combined, '}');
+	let L = [sprintf('table inet %s {', NFT_TABLE)];
+	push(L, ...all_lines);
+	push(L, '}');
 
-	let tmpfile = NFT_TEMP + '.strategies_all';
-	write_str(tmpfile, join('\n', combined) + '\n');
-	nft_file('install', tmpfile, NFT_STRATEGY_FILE);
-	rm(tmpfile);
+	nft_file('add', 'dynamic', ...L);
 }
 
 // ── nftables User Rules ──────────────────────────────────────────────
@@ -1035,6 +1100,7 @@ function _build_user_rule(s, family_flag) { // ucode-lsp disable
 	}
 
 	if (length(rule) > 15) {
+		push(status.warnings, { code: 'warningRuleNameTooLong', info: rule });
 		LOG('warn', sprintf('Rule %s exceeds 15 chars, skipping', rule));
 		return null;
 	}
@@ -1170,11 +1236,17 @@ function set_user_rules() {
 
 	push(L, '}');
 
-	let tmpfile = NFT_TEMP + '.rules';
-	write_str(tmpfile, join('\n', L) + '\n');
-	nft_file('install', tmpfile, NFT_RULES_FILE);
-	rm(tmpfile);
+	nft_file('add', 'rules', ...L);
 }
+
+// ── Rebuild Dynamic File ─────────────────────────────────────────────
+
+rebuild_dynamic = function() {
+	nft_file('create', 'dynamic');
+	set_general_nftables();
+	rebuild_iface_nftfile();
+	set_strategies_nftables();
+};
 
 // ── Interface Routes ─────────────────────────────────────────────────
 
@@ -1280,11 +1352,11 @@ function report_iface_status() {
 			let device = network_get_device(iface);
 			let ip_cmd = (family == 'ipv4') ? 'ip -4' : 'ip -6';
 			let status_iface = sprintf('%s_%s', iface, family);
-			let status = read_str(sprintf('%s/%s/STATUS', TRACK_STATUS_DIR, status_iface)) || 'unknown';
+			let iface_st = read_str(sprintf('%s/%s/STATUS', TRACK_STATUS_DIR, status_iface)) || 'unknown';
 			let tracking = get_mwan4track_status(iface, family);
 			let detail;
 
-			if (status == 'online') {
+			if (iface_st == 'online') {
 				let online = get_online_time(status_iface);
 				let uptime = network_get_uptime(iface);
 				let hotplug_state = get_iface_hotplug_state(iface);
@@ -1312,9 +1384,9 @@ function report_iface_status() {
 
 			let msg;
 			if (detail)
-				msg = sprintf(' interface %s (%s) is %s and tracking is %s (%s)', iface, family, status, tracking, detail);
+				msg = sprintf(' interface %s (%s) is %s and tracking is %s (%s)', iface, family, iface_st, tracking, detail);
 			else
-				msg = sprintf(' interface %s (%s) is %s and tracking is %s', iface, family, status, tracking);
+				msg = sprintf(' interface %s (%s) is %s and tracking is %s', iface, family, iface_st, tracking);
 			push(result, msg);
 		});
 	});
@@ -1399,18 +1471,18 @@ function report_rules(family) {
 // ── Interface Lifecycle ──────────────────────────────────────────────
 
 function interface_hotplug_shutdown(iface, ifdown) {
-	let status = 'offline';
+	let iface_st = 'offline';
 	for (let family in get_families(iface)) {
 		let status_iface = sprintf('%s_%s', iface, family);
 		let st = read_str(sprintf('%s/%s/STATUS', TRACK_STATUS_DIR, status_iface));
-		if (st == 'online') { status = 'online'; break; }
+		if (st == 'online') { iface_st = 'online'; break; }
 	}
 
-	if (status != 'online' && !ifdown) return;
+	if (iface_st != 'online' && !ifdown) return;
 
 	if (ifdown) {
 		system(sprintf("env -i ACTION=ifdown INTERFACE=%s sh /etc/hotplug.d/iface/15-mwan4", iface));
-	} else if (status == 'online') {
+	} else if (iface_st == 'online') {
 		system(sprintf("env -i MWAN4_SHUTDOWN=1 ACTION=disconnected INTERFACE=%s /sbin/hotplug-call iface", iface));
 	}
 }
@@ -1455,10 +1527,10 @@ function ifup(iface, caller) {
 	}
 
 	let true_iface = get_true_iface(iface);
-	let status = ubus_call(sprintf('network.interface.%s', true_iface), 'status');
-	if (!status?.up || !status?.l3_device) return;
+	let iface_status = ubus_call(sprintf('network.interface.%s', true_iface), 'status');
+	if (!iface_status?.up || !iface_status?.l3_device) return;
 
-	let l3_device = status.l3_device;
+	let l3_device = iface_status.l3_device;
 	let cmd_str = sprintf("env -i MWAN4_STARTUP=%s ACTION=ifup INTERFACE=%s DEVICE=%s sh /etc/hotplug.d/iface/15-mwan4",
 		caller, iface, l3_device);
 	system(cmd_str);
@@ -1478,11 +1550,7 @@ export default {
 	NFT_IPV4,
 	NFT_IPV6,
 	NFT_TEMP,
-	NFT_BASE_FILE,
-	NFT_SETS_FILE,
-	NFT_IFACE_FILE,
-	NFT_STRATEGY_FILE,
-	NFT_RULES_FILE,
+	NFT_FILES,
 	IPv4_RE,
 	IPv6_RE,
 
@@ -1496,6 +1564,7 @@ export default {
 	nft_file,
 	nft_output,
 	ubus_call,
+	status,
 
 	// UCI
 	uci_bool,
@@ -1538,11 +1607,10 @@ export default {
 	set_connected_ipv4,
 	set_connected_ipv6,
 	set_dynamic_nftset,
-	begin_set_accumulation,
-	install_sets_nftfile,
 	rebuild_iface_nftfile,
 	set_strategies_nftables,
 	set_user_rules,
+	rebuild_dynamic,
 
 	// Interface management
 	create_iface_route,

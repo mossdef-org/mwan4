@@ -19,16 +19,17 @@ m.uci_foreach('interface', function(s) {
 	m.ifup(s['.name'], 'init');
 });
 
-// Generate all nftables files
-m.set_general_nftables();
-m.begin_set_accumulation();
+// Generate dynamic file (base structure + interfaces + strategies)
+m.rebuild_dynamic();
+
+// Generate rules file (sets + user rules)
+m.nft_file('create', 'rules');
 m.set_dynamic_nftset();
 m.set_connected_ipv4();
 m.set_connected_ipv6();
 m.set_custom_nftset();
-m.install_sets_nftfile();
-m.rebuild_iface_nftfile();
-m.set_strategies_nftables();
 m.set_user_rules();
 
+// Validate combined and install
+m.nft_file('install', 'all');
 m.fw4_reload();

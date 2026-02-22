@@ -4,8 +4,10 @@ Testing set_general_nftables() with default config (wan enabled, IPv4).
 import m from 'mwan4';
 m.set_scriptname('test');
 m.init();
+m.nft_file('create', 'dynamic');
 m.set_general_nftables();
-print(global.mocklib.read_captured('/usr/share/nftables.d/ruleset-post/10-mwan4-base.nft'));
+m.nft_file('install', 'dynamic');
+print(global.mocklib.read_captured('/usr/share/nftables.d/ruleset-post/10-mwan4.nft'));
 -- End --
 
 -- Expect stdout --

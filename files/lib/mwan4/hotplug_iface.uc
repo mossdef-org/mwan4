@@ -14,8 +14,8 @@ let INTERFACE = getenv('INTERFACE');
 let DEVICE = getenv('DEVICE');
 let MWAN4_STARTUP = getenv('MWAN4_STARTUP');
 
-// Check if mwan4 has been set up (base nft file exists)
-if (!m.file_exists(m.NFT_BASE_FILE)) {
+// Check if mwan4 has been set up (dynamic nft file exists)
+if (!m.nft_file('exists', 'dynamic')) {
 	m.LOG('warn', 'hotplug called on', INTERFACE, 'before mwan4 has been set up');
 	exit(0);
 }
@@ -28,21 +28,21 @@ if (!enabled) {
 }
 
 // Determine initial status
-let status;
+let hp_status;
 let initial_state = m.uci_get(INTERFACE, 'initial_state') || 'online';
 if (initial_state == 'offline') {
-	status = 'offline';
+	hp_status = 'offline';
 	let families = m.get_families(INTERFACE);
 	for (let family in families) {
 		let status_iface = INTERFACE + '_' + family;
 		let fam_status = rtrim(readfile(sprintf('%s/%s/STATUS', m.TRACK_STATUS_DIR, status_iface)) || '', '\n');
 		if (fam_status == 'online') {
-			status = 'online';
+			hp_status = 'online';
 			break;
 		}
 	}
 } else {
-	status = 'online';
+	hp_status = 'online';
 }
 
 m.LOG('notice', sprintf('Execute %s event on interface %s (%s)', ACTION, INTERFACE, DEVICE || 'unknown'));
@@ -63,19 +63,19 @@ function signal_trackers(signame) {
 switch (ACTION) {
 case 'connected':
 	m.set_iface_hotplug_state(INTERFACE, 'online');
-	m.set_strategies_nftables();
+	m.rebuild_dynamic();
+	m.nft_file('install', 'dynamic');
 	m.fw4_reload();
 	break;
 
 case 'ifup':
 	m.create_iface_rules(INTERFACE, DEVICE);
 	m.create_iface_route(INTERFACE);
-	m.set_iface_hotplug_state(INTERFACE, status);
+	m.set_iface_hotplug_state(INTERFACE, hp_status);
 	if (MWAN4_STARTUP != 'init') {
 		m.set_general_rules();
-		m.rebuild_iface_nftfile();
-		m.set_strategies_nftables();
-		m.set_user_rules();
+		m.rebuild_dynamic();
+		m.nft_file('install', 'dynamic');
 		m.fw4_reload();
 	}
 	signal_trackers('USR2');
@@ -83,7 +83,8 @@ case 'ifup':
 
 case 'disconnected':
 	m.set_iface_hotplug_state(INTERFACE, 'offline');
-	m.set_strategies_nftables();
+	m.rebuild_dynamic();
+	m.nft_file('install', 'dynamic');
 	m.fw4_reload();
 	break;
 
@@ -92,9 +93,8 @@ case 'ifdown':
 	m.delete_iface_rules(INTERFACE);
 	m.delete_iface_route(INTERFACE);
 	signal_trackers('USR1');
-	m.rebuild_iface_nftfile();
-	m.set_strategies_nftables();
-	m.set_user_rules();
+	m.rebuild_dynamic();
+	m.nft_file('install', 'dynamic');
 	m.fw4_reload();
 	break;
 }

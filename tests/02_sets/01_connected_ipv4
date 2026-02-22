@@ -4,10 +4,10 @@ Testing set_connected_ipv4() with default config and mock route table.
 import m from 'mwan4';
 m.set_scriptname('test');
 m.init();
-m.begin_set_accumulation();
+m.nft_file('create', 'rules');
 m.set_connected_ipv4();
-m.install_sets_nftfile();
-print(global.mocklib.read_captured('/usr/share/nftables.d/ruleset-post/11-mwan4-sets.nft'));
+m.nft_file('install', 'rules');
+print(global.mocklib.read_captured('/usr/share/nftables.d/ruleset-post/11-mwan4-rules.nft'));
 -- End --
 
 -- Expect stdout --

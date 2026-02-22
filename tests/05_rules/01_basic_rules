@@ -5,8 +5,10 @@ import m from 'mwan4';
 m.set_scriptname('test');
 m.init();
 m.update_iface_to_table();
+m.nft_file('create', 'rules');
 m.set_user_rules();
-print(global.mocklib.read_captured('/usr/share/nftables.d/ruleset-post/14-mwan4-rules.nft'));
+m.nft_file('install', 'rules');
+print(global.mocklib.read_captured('/usr/share/nftables.d/ruleset-post/11-mwan4-rules.nft'));
 -- End --
 
 -- Expect stdout --

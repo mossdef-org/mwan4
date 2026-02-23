@@ -1,0 +1,40 @@
+Testing consumer API: is_interface, get_iface_mark, get_iface_chain, get_strategy_chain, get_interfaces, get_strategies.
+
+-- Testcase --
+import m from 'mwan4';
+m.set_scriptname('test');
+m.load();
+
+// is_interface
+print('wan enabled: ' + m.is_interface('wan') + '\n');
+print('wan6 enabled: ' + m.is_interface('wan6') + '\n');
+print('nonexistent enabled: ' + m.is_interface('nonexistent') + '\n');
+
+// get_iface_mark
+print('wan mark: ' + m.get_iface_mark('wan') + '\n');
+print('nonexistent mark: ' + m.get_iface_mark('nonexistent') + '\n');
+
+// get_iface_chain
+print('wan chain: ' + m.get_iface_chain('wan') + '\n');
+
+// get_strategy_chain
+print('wan_only strategy chain: ' + m.get_strategy_chain('wan_only') + '\n');
+
+// get_interfaces (only enabled)
+print('interfaces: ' + join(',', m.get_interfaces()) + '\n');
+
+// get_strategies (all)
+print('strategies: ' + join(',', m.get_strategies()) + '\n');
+-- End --
+
+-- Expect stdout --
+wan enabled: true
+wan6 enabled: false
+nonexistent enabled: false
+wan mark: 0x100
+nonexistent mark: null
+wan chain: mwan4_iface_in_wan
+wan_only strategy chain: mwan4_strategy_wan_only
+interfaces: wan
+strategies: wan_only,wanb_only,balanced,wan_wanb,wanb_wan
+-- End --

@@ -21,7 +21,7 @@ start_tracker_family() {
 	local family="$2"
 
 	procd_open_instance "track_${interface}_${family}"
-	procd_set_param command ucode -S -L /lib/mwan4 /lib/mwan4/mwan4track.uc -- "$interface" "$family"
+	procd_set_param command ucode -S -L /lib/mwan4 /lib/mwan4/mwan4track.uc "$interface" "$family"
 	procd_set_param respawn
 	procd_close_instance
 }
@@ -52,14 +52,14 @@ start_service() {
 	ucode -S -L /lib/mwan4 /lib/mwan4/init_setup.uc
 
 	procd_open_instance rtmon_ipv4
-	procd_set_param command ucode -S -L /lib/mwan4 /lib/mwan4/mwan4rtmon.uc -- ipv4
+	procd_set_param command ucode -S -L /lib/mwan4 /lib/mwan4/mwan4rtmon.uc ipv4
 	procd_set_param respawn
 	procd_close_instance
 
 	# Check IPv6 support
 	if command -v ip > /dev/null && ip -6 addr show > /dev/null 2>&1; then
 		procd_open_instance rtmon_ipv6
-		procd_set_param command ucode -S -L /lib/mwan4 /lib/mwan4/mwan4rtmon.uc -- ipv6
+		procd_set_param command ucode -S -L /lib/mwan4 /lib/mwan4/mwan4rtmon.uc ipv6
 		procd_set_param respawn
 		procd_close_instance
 	fi

@@ -1559,6 +1559,47 @@ function ifup(iface, caller) {
 	system(cmd_str);
 }
 
+// ── Consumer API ─────────────────────────────────────────────────────
+
+function is_interface(iface) {
+	_ensure_init();
+	return uci_bool(uci_get(iface, 'enabled'));
+}
+
+function get_iface_mark(iface) {
+	_ensure_init();
+	let id = get_iface_id(iface);
+	if (!id) return null;
+	return id2mask(id, mwan4.mmx_mask);
+}
+
+function get_iface_chain(iface) {
+	return sprintf('%s_iface_in_%s', NFT_PREFIX, iface);
+}
+
+function get_strategy_chain(strategy) {
+	return sprintf('%s_strategy_%s', NFT_PREFIX, strategy);
+}
+
+function get_interfaces() {
+	_ensure_init();
+	let result = [];
+	uci_foreach('interface', function(s) {
+		if (uci_bool(s.enabled))
+			push(result, s['.name']);
+	});
+	return result;
+}
+
+function get_strategies() {
+	_ensure_init();
+	let result = [];
+	uci_foreach('strategy', function(s) {
+		push(result, s['.name']);
+	});
+	return result;
+}
+
 // ── Method Assignment ────────────────────────────────────────────────
 
 mwan4.pkg = pkg;
@@ -1622,6 +1663,14 @@ mwan4.delete_iface_rules = delete_iface_rules;
 // Reload & utilities
 mwan4.fw4_reload = fw4_reload;
 mwan4.file_exists = file_exists;
+
+// Consumer API
+mwan4.is_interface = is_interface;
+mwan4.get_iface_mark = get_iface_mark;
+mwan4.get_iface_chain = get_iface_chain;
+mwan4.get_strategy_chain = get_strategy_chain;
+mwan4.get_interfaces = get_interfaces;
+mwan4.get_strategies = get_strategies;
 
 // Reporting
 mwan4.report_iface_status = report_iface_status;

@@ -1,2 +1,2 @@
 #!/bin/sh
-exec ucode -S -L /lib/mwan4 /lib/mwan4/cli.uc -- "$@"
+exec ucode -S -L /lib/mwan4 /lib/mwan4/cli.uc "$@"

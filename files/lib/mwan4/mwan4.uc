@@ -6,9 +6,10 @@
 import { readfile, writefile, popen, stat, unlink } from 'fs';
 import { cursor } from 'uci';
 
-// Forward declaration — defined later but referenced by the export block.
+// Forward declarations — defined later but referenced by the export block.
 // ucode does not hoist function declarations.
 let rebuild_dynamic;
+let _ensure_init;
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -49,6 +50,7 @@ let iface_max = 0;
 let iface_tbl = {};
 let dev_tbl = { ipv4: {}, ipv6: {} };
 let source_routing = false;
+let _loaded = false;
 
 // ── Structured Status ────────────────────────────────────────────────
 
@@ -329,11 +331,13 @@ function uci_bool(val) {
 }
 
 function uci_get(section, option, def) {
+	_ensure_init();
 	let val = uci_ctx?.get('mwan4', section, option);
 	return val ?? def ?? null;
 }
 
 function uci_get_list(section, option) {
+	_ensure_init();
 	let val = uci_ctx?.get('mwan4', section, option);
 	if (val == null) return [];
 	if (type(val) == 'array') return val;
@@ -347,7 +351,44 @@ function uci_get_bool(section, option, def) {
 }
 
 function uci_foreach(stype, callback) {
+	_ensure_init();
 	uci_ctx?.foreach('mwan4', stype, callback);
+}
+
+// ── Lazy Initialization ──────────────────────────────────────────────
+
+_ensure_init = function() {
+	if (_loaded) return;
+	_loaded = true;
+
+	if (!uci_ctx) {
+		uci_ctx = cursor();
+		uci_ctx.load('mwan4');
+	}
+
+	no_ipv6 = (system('ip -6 addr show >/dev/null 2>&1') == 0) ? 0 : 1;
+
+	if (!mmx_mask) {
+		mmx_mask = uci_get('globals', 'mmx_mask') || '0x3F00';
+		mmx_mask = lc(mmx_mask);
+	}
+
+	let bitcnt = count_one_bits(mmx_mask);
+	let mmdefault = (1 << bitcnt) - 1;
+	if (!iface_max)
+		iface_max = mmdefault - 3;
+
+	mm_blackhole = mmdefault - 2;
+	mm_unreachable = mmdefault - 1;
+	mmx_default = id2mask(mmdefault, mmx_mask);
+	mmx_blackhole = id2mask(mm_blackhole, mmx_mask);
+	mmx_unreachable = id2mask(mm_unreachable, mmx_mask);
+
+	source_routing = uci_get_bool('globals', 'source_routing', false);
+};
+
+function load() {
+	_ensure_init();
 }
 
 // ── Uptime ───────────────────────────────────────────────────────────
@@ -539,12 +580,6 @@ function get_iface_hotplug_state(iface) {
 function init(name) {
 	if (name) scriptname = name;
 
-	// Check IPv6
-	no_ipv6 = (system('ip -6 addr show >/dev/null 2>&1') == 0) ? 0 : 1;
-
-	uci_ctx = cursor();
-	uci_ctx.load('mwan4');
-
 	ensure_dir(STATUS_DIR + '/iface_state');
 	ensure_dir(STATUS_NFT_LOG_DIR);
 	ensure_dir(TRACK_STATUS_DIR);
@@ -555,29 +590,15 @@ function init(name) {
 		iface_max = read_int(STATUS_DIR + '/iface_max');
 	}
 
-	if (!mmx_mask) {
-		mmx_mask = uci_get('globals', 'mmx_mask') || '0x3F00';
-		mmx_mask = lc(mmx_mask);
+	_loaded = false;
+	_ensure_init();
+
+	if (!saved_mask) {
 		writefile(STATUS_DIR + '/mmx_mask', mmx_mask);
 		LOG('debug', 'Using firewall mask', mmx_mask);
-
-		let bitcnt = count_one_bits(mmx_mask);
-		let mmdefault = (1 << bitcnt) - 1;
-		iface_max = mmdefault - 3;
 		writefile(STATUS_DIR + '/iface_max', '' + iface_max);
 		LOG('debug', 'Max interface count is', '' + iface_max);
 	}
-
-	let bitcnt = count_one_bits(mmx_mask);
-	let mmdefault = (1 << bitcnt) - 1;
-	mm_blackhole = mmdefault - 2;
-	mm_unreachable = mmdefault - 1;
-
-	mmx_default = id2mask(mmdefault, mmx_mask);
-	mmx_blackhole = id2mask(mm_blackhole, mmx_mask);
-	mmx_unreachable = id2mask(mm_unreachable, mmx_mask);
-
-	source_routing = uci_get_bool('globals', 'source_routing', false);
 }
 
 // ── General IP Rules ─────────────────────────────────────────────────
@@ -1556,6 +1577,7 @@ export default {
 
 	// Core
 	init,
+	load,
 	LOG,
 	set_scriptname,
 	read_str,
@@ -1585,12 +1607,12 @@ export default {
 	get_routes,
 
 	// State accessors
-	no_ipv6: () => no_ipv6,
-	mmx_mask: () => mmx_mask,
-	mmx_default: () => mmx_default,
-	mmx_blackhole: () => mmx_blackhole,
-	mmx_unreachable: () => mmx_unreachable,
-	iface_max: () => iface_max,
+	no_ipv6: () => { _ensure_init(); return no_ipv6; },
+	mmx_mask: () => { _ensure_init(); return mmx_mask; },
+	mmx_default: () => { _ensure_init(); return mmx_default; },
+	mmx_blackhole: () => { _ensure_init(); return mmx_blackhole; },
+	mmx_unreachable: () => { _ensure_init(); return mmx_unreachable; },
+	iface_max: () => { _ensure_init(); return iface_max; },
 
 	// Table mapping
 	update_iface_to_table,

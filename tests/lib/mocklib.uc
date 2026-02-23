@@ -232,15 +232,6 @@ global.mocklib = {
 	delete_captured: (path) => { delete _captured[path]; },
 };
 
-/* Override int() to handle hex string parsing (ucode's built-in int()
- * does not parse "0x..." strings — it returns 0. The mwan4 code passes
- * hex strings like "0x3f00" through int() in count_one_bits/id2mask.) */
-global.int = ((_orig) => function(n) {
-	if (type(n) == "string" && match(n, /^0[xX]/))
-		return hex(n);
-	return _orig(n);
-})(int);
-
 /* Override stdlib functions */
 global.system = function(argv, timeout) {
 	trace_call(null, "system", { command: argv, timeout });

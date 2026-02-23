@@ -299,7 +299,7 @@ function network_get_uptime(iface) { // ucode-lsp disable
 
 function count_one_bits(n) {
 	let count = 0;
-	n = int(n);
+	n = +n;
 	while (n > 0) {
 		n = n & (n - 1);
 		count++;
@@ -309,7 +309,7 @@ function count_one_bits(n) {
 
 function id2mask(id, mask) {
 	let bit_val = 0, result = 0;
-	let m = int(mask), v = int(id);
+	let m = +mask, v = +id;
 	for (let bit = 0; bit < 32; bit++) {
 		if ((m >> bit) & 1) {
 			if ((v >> bit_val) & 1)

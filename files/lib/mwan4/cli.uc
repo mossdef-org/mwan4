@@ -66,7 +66,7 @@ function cmd_strategies() {
 	for (let line in m.report_strategies('ipv4'))
 		println(line);
 	println('');
-	if (!m.no_ipv6()) {
+	if (!m.no_ipv6) {
 		println('Current ipv6 strategies:');
 		for (let line in m.report_strategies('ipv6'))
 			println(line);
@@ -79,7 +79,7 @@ function cmd_connected() {
 	for (let line in m.report_connected('ipv4'))
 		println(line);
 	println('');
-	if (!m.no_ipv6()) {
+	if (!m.no_ipv6) {
 		println('Directly connected ipv6 networks:');
 		for (let line in m.report_connected('ipv6'))
 			println(line);
@@ -92,7 +92,7 @@ function cmd_rules() {
 	for (let line in m.report_rules('ipv4'))
 		println(line);
 	println('');
-	if (!m.no_ipv6()) {
+	if (!m.no_ipv6) {
 		println('Active ipv6 user rules:');
 		for (let line in m.report_rules('ipv6'))
 			println(line);
@@ -171,9 +171,9 @@ function cmd_internal(args) {
 	}
 
 	// nftables (replaces iptables which was never used with nftables-based mwan4)
-	println('Output of "nft list table inet ' + m.NFT_TABLE + '"');
+	println('Output of "nft list table inet ' + m.pkg.NFT_TABLE + '"');
 	println(dash);
-	output = rtrim(run_cmd('nft list table inet ' + m.NFT_TABLE + ' 2>/dev/null'));
+	output = rtrim(run_cmd('nft list table inet ' + m.pkg.NFT_TABLE + ' 2>/dev/null'));
 	println(length(output) ? output : 'No data found');
 }
 
@@ -199,7 +199,7 @@ function cmd_use(args) {
 		return 1;
 	}
 	let family = m.uci_get(iface, 'family') || 'ipv4';
-	let fwmark = m.mmx_default();
+	let fwmark = m.mmx_default;
 
 	let quoted_args = map(args, shell_quote);
 	let cmd = sprintf(

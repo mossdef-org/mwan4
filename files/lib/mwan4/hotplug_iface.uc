@@ -35,7 +35,7 @@ if (initial_state == 'offline') {
 	let families = m.get_families(INTERFACE);
 	for (let family in families) {
 		let status_iface = INTERFACE + '_' + family;
-		let fam_status = rtrim(readfile(sprintf('%s/%s/STATUS', m.TRACK_STATUS_DIR, status_iface)) || '', '\n');
+		let fam_status = rtrim(readfile(sprintf('%s/%s/STATUS', m.pkg.TRACK_STATUS_DIR, status_iface)) || '', '\n');
 		if (fam_status == 'online') {
 			hp_status = 'online';
 			break;

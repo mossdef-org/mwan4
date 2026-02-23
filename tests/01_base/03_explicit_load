@@ -4,8 +4,8 @@ Testing explicit load() function.
 import m from 'mwan4';
 m.set_scriptname('test');
 m.load();
-print('mmx_mask: ' + m.mmx_mask() + '\n');
-print('iface_max: ' + m.iface_max() + '\n');
+print('mmx_mask: ' + m.mmx_mask + '\n');
+print('iface_max: ' + m.iface_max + '\n');
 -- End --
 
 -- Expect stdout --

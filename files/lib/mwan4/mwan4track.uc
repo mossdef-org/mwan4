@@ -30,7 +30,7 @@ function getpid() {
 let INTERFACE = ARGV[0];
 let FAMILY = ARGV[1] || 'ipv4';
 let status_iface = INTERFACE + '_' + FAMILY;
-let status_dir = m.TRACK_STATUS_DIR + '/' + status_iface;
+let status_dir = m.pkg.TRACK_STATUS_DIR + '/' + status_iface;
 
 // ── State ────────────────────────────────────────────────────────────
 
@@ -80,13 +80,13 @@ function hotplug(action, extra) {
 function wrap(cmd) {
 	return system(sprintf(
 		'FAMILY=%s DEVICE=%s SRCIP=%s FWMARK=%s LD_PRELOAD=/lib/mwan4/libwrap_mwan4_sockopt.so.1.0 %s',
-		FAMILY, DEVICE, SRC_IP, m.mmx_default(), cmd));
+		FAMILY, DEVICE, SRC_IP, m.mmx_default, cmd));
 }
 
 function wrap_output(cmd) {
 	let full = sprintf(
 		'FAMILY=%s DEVICE=%s SRCIP=%s FWMARK=%s LD_PRELOAD=/lib/mwan4/libwrap_mwan4_sockopt.so.1.0 %s',
-		FAMILY, DEVICE, SRC_IP, m.mmx_default(), cmd);
+		FAMILY, DEVICE, SRC_IP, m.mmx_default, cmd);
 	let p = popen(full + ' 2>/dev/null', 'r');
 	if (!p) return { rc: 1, out: '' };
 	let out = p.read('all') || '';

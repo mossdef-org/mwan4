@@ -10,7 +10,7 @@ m.set_scriptname('mwan4rtmon');
 m.init();
 
 let family = ARGV[0] || 'ipv4';
-if (family == 'ipv6' && m.no_ipv6()) {
+if (family == 'ipv6' && m.no_ipv6) {
 	m.LOG('warn', 'mwan4rtmon started for ipv6, but ipv6 not enabled on system');
 	exit(1);
 }
@@ -20,8 +20,8 @@ let ip = (family == 'ipv4') ? 'ip -4' : 'ip -6';
 // ── Check if interface is active (nftables chain exists) ─────────────
 
 function iface_active(iface, fam) { // ucode-lsp disable
-	let chain = sprintf('%s_iface_in_%s_%s', m.NFT_PREFIX, iface, fam);
-	return length(m.nft_output(sprintf('list chain inet %s %s 2>/dev/null', m.NFT_TABLE, chain))) > 0;
+	let chain = sprintf('%s_iface_in_%s_%s', m.pkg.NFT_PREFIX, iface, fam);
+	return length(m.nft_output(sprintf('list chain inet %s %s 2>/dev/null', m.pkg.NFT_TABLE, chain))) > 0;
 }
 
 // ── Add all routes to active interface tables ────────────────────────
@@ -75,7 +75,7 @@ function handle_route(raw_line) {
 		let prefix = split('' + route_line, ' ')[0];
 		if (prefix)
 			system(sprintf('nft add element inet %s %s_connected_%s { %s } 2>/dev/null',
-				m.NFT_TABLE, m.NFT_PREFIX, family, prefix));
+				m.pkg.NFT_TABLE, m.pkg.NFT_PREFIX, family, prefix));
 	} else {
 		action = 'del';
 		// Rebuild connected set

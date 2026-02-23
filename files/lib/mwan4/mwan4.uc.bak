@@ -64,12 +64,12 @@ let mwan4 = {
 
 // ── Utility Functions ────────────────────────────────────────────────
 
-function set_scriptname(name) { mwan4.scriptname = name; }
+function set_scriptname(name) { scriptname = name; }
 
 function LOG(facility, ...args) {
 	if (facility == 'debug') return;
 	let msg = replace(join(' ', args), "'", "'\\''");
-	system(sprintf("logger -t '%s' -p %s '%s'", mwan4.scriptname, facility, msg));
+	system(sprintf("logger -t '%s' -p %s '%s'", scriptname, facility, msg));
 }
 
 function run(c) {
@@ -117,7 +117,7 @@ let nft_file = (function() {
 	function check(filepath) {
 		let err = trim(cmd_output(sprintf('nft -c -f %s 2>&1', filepath)));
 		if (length(err)) {
-			push(mwan4.errors, { code: 'errorNftCheck', info: filepath + ': ' + err });
+			push(status.errors, { code: 'errorNftCheck', info: filepath + ': ' + err });
 			LOG('error', 'nft check failed for', filepath + ':', err);
 			return false;
 		}
@@ -129,7 +129,7 @@ let nft_file = (function() {
 			return false;
 		let err = trim(cmd_output(sprintf('nft -f %s 2>&1', filepath)));
 		if (length(err)) {
-			push(mwan4.errors, { code: 'errorNftApply', info: filepath + ': ' + err });
+			push(status.errors, { code: 'errorNftApply', info: filepath + ': ' + err });
 			LOG('error', 'nft -f', filepath + ':', err);
 			return false;
 		}
@@ -156,7 +156,7 @@ let nft_file = (function() {
 		let err = trim(cmd_output(sprintf('nft -c -f %s 2>&1', combined)));
 		unlink(combined);
 		if (length(err)) {
-			push(mwan4.errors, { code: 'errorNftCombinedCheck', info: err });
+			push(status.errors, { code: 'errorNftCombinedCheck', info: err });
 			LOG('error', 'Combined nft validation failed:', err);
 			return false;
 		}
@@ -190,7 +190,7 @@ let nft_file = (function() {
 		let err = trim(cmd_output(sprintf('nft -c -f %s 2>&1', combined)));
 		unlink(combined);
 		if (length(err)) {
-			push(mwan4.errors, { code: 'errorNftCombinedCheck', info: err });
+			push(status.errors, { code: 'errorNftCombinedCheck', info: err });
 			LOG('error', 'Combined nft validation failed:', err);
 			return false;
 		}
@@ -245,7 +245,7 @@ let nft_file = (function() {
 function fw4_reload() {
 	let rc = system('fw4 -q reload 2>/dev/null');
 	if (rc != 0) {
-		push(mwan4.errors, { code: 'errorFw4Reload', info: 'fw4 reload exit code ' + rc });
+		push(status.errors, { code: 'errorFw4Reload', info: 'fw4 reload exit code ' + rc });
 		LOG('error', 'fw4 reload failed');
 	}
 	return rc == 0;
@@ -368,25 +368,25 @@ _ensure_init = function() {
 		uci_ctx.load('mwan4');
 	}
 
-	mwan4.no_ipv6 = (system('ip -6 addr show >/dev/null 2>&1') == 0) ? 0 : 1;
+	no_ipv6 = (system('ip -6 addr show >/dev/null 2>&1') == 0) ? 0 : 1;
 
-	if (!mwan4.mmx_mask) {
-		mwan4.mmx_mask = uci_get('globals', 'mwan4.mmx_mask') || '0x3F00';
-		mwan4.mmx_mask = lc(mwan4.mmx_mask);
+	if (!mmx_mask) {
+		mmx_mask = uci_get('globals', 'mmx_mask') || '0x3F00';
+		mmx_mask = lc(mmx_mask);
 	}
 
-	let bitcnt = count_one_bits(mwan4.mmx_mask);
+	let bitcnt = count_one_bits(mmx_mask);
 	let mmdefault = (1 << bitcnt) - 1;
-	if (!mwan4.iface_max)
-		mwan4.iface_max = mmdefault - 3;
+	if (!iface_max)
+		iface_max = mmdefault - 3;
 
 	mm_blackhole = mmdefault - 2;
 	mm_unreachable = mmdefault - 1;
-	mwan4.mmx_default = id2mask(mmdefault, mwan4.mmx_mask);
-	mwan4.mmx_blackhole = id2mask(mm_blackhole, mwan4.mmx_mask);
-	mwan4.mmx_unreachable = id2mask(mm_unreachable, mwan4.mmx_mask);
+	mmx_default = id2mask(mmdefault, mmx_mask);
+	mmx_blackhole = id2mask(mm_blackhole, mmx_mask);
+	mmx_unreachable = id2mask(mm_unreachable, mmx_mask);
 
-	mwan4.source_routing = uci_get_bool('globals', 'mwan4.source_routing', false);
+	source_routing = uci_get_bool('globals', 'source_routing', false);
 };
 
 function load() {
@@ -503,16 +503,16 @@ function get_mwan4track_status(iface, family) {
 // ── Interface Table Mapping ──────────────────────────────────────────
 
 function update_iface_to_table() {
-	mwan4.iface_tbl = {};
+	iface_tbl = {};
 	let tid = 0;
 	uci_foreach('interface', function(s) {
 		tid++;
-		mwan4.iface_tbl[s['.name']] = tid;
+		iface_tbl[s['.name']] = tid;
 	});
 }
 
 function update_dev_to_table() {
-	mwan4.dev_tbl = { ipv4: {}, ipv6: {} };
+	dev_tbl = { ipv4: {}, ipv6: {} };
 	let tid = 0;
 	uci_foreach('interface', function(s) {
 		tid++;
@@ -520,19 +520,19 @@ function update_dev_to_table() {
 		let device = network_get_device(s['.name']);
 		if (!device) return;
 		for (let family in get_families(s['.name']))
-			mwan4.dev_tbl[family][device] = tid;
+			dev_tbl[family][device] = tid;
 	});
 }
 
 function get_iface_id(iface) {
-	if (!length(keys(mwan4.iface_tbl))) update_iface_to_table();
-	return mwan4.iface_tbl[iface];
+	if (!length(keys(iface_tbl))) update_iface_to_table();
+	return iface_tbl[iface];
 }
 
 function route_line_dev(route_line, route_family) {
 	let m = match(route_line, /dev ([^ ]+)/);
 	if (!m) return null;
-	return mwan4.dev_tbl[route_family]?.[m[1]];
+	return dev_tbl[route_family]?.[m[1]];
 }
 
 // ── Route Line Cleaning ──────────────────────────────────────────────
@@ -542,7 +542,7 @@ function clean_route_line(line) {
 	line = replace(line, /linkdown /, '');
 	line = replace(line, /expires [0-9]+sec/, '');
 	line = replace(line, /error [0-9]+/, '');
-	if (!mwan4.source_routing)
+	if (!source_routing)
 		line = replace(line, /default(.*) from [^ ]*/, 'default$1');
 	return trim(line);
 }
@@ -580,26 +580,26 @@ function get_iface_hotplug_state(iface) {
 // ── Initialization ───────────────────────────────────────────────────
 
 function init(name) {
-	if (name) mwan4.scriptname = name;
+	if (name) scriptname = name;
 
 	ensure_dir(STATUS_DIR + '/iface_state');
 	ensure_dir(STATUS_NFT_LOG_DIR);
 	ensure_dir(TRACK_STATUS_DIR);
 
-	let saved_mask = read_str(STATUS_DIR + '/mwan4.mmx_mask');
+	let saved_mask = read_str(STATUS_DIR + '/mmx_mask');
 	if (saved_mask) {
-		mwan4.mmx_mask = saved_mask;
-		mwan4.iface_max = read_int(STATUS_DIR + '/mwan4.iface_max');
+		mmx_mask = saved_mask;
+		iface_max = read_int(STATUS_DIR + '/iface_max');
 	}
 
 	_loaded = false;
 	_ensure_init();
 
 	if (!saved_mask) {
-		writefile(STATUS_DIR + '/mwan4.mmx_mask', mwan4.mmx_mask);
-		LOG('debug', 'Using firewall mask', mwan4.mmx_mask);
-		writefile(STATUS_DIR + '/mwan4.iface_max', '' + mwan4.iface_max);
-		LOG('debug', 'Max interface count is', '' + mwan4.iface_max);
+		writefile(STATUS_DIR + '/mmx_mask', mmx_mask);
+		LOG('debug', 'Using firewall mask', mmx_mask);
+		writefile(STATUS_DIR + '/iface_max', '' + iface_max);
+		LOG('debug', 'Max interface count is', '' + iface_max);
 	}
 }
 
@@ -607,16 +607,16 @@ function init(name) {
 
 function set_general_rules() {
 	for (let ip_ver in ['ip -4', 'ip -6']) {
-		if (ip_ver == 'ip -6' && mwan4.no_ipv6 != 0) continue;
+		if (ip_ver == 'ip -6' && no_ipv6 != 0) continue;
 
 		let rule_no = mm_blackhole + 2000;
 		let existing = cmd_output(sprintf('%s rule list', ip_ver));
 		if (index(existing, rule_no + ':') < 0)
-			run(sprintf('%s rule add pref %d fwmark %s/%s blackhole', ip_ver, rule_no, mwan4.mmx_blackhole, mwan4.mmx_mask));
+			run(sprintf('%s rule add pref %d fwmark %s/%s blackhole', ip_ver, rule_no, mmx_blackhole, mmx_mask));
 
 		rule_no = mm_unreachable + 2000;
 		if (index(existing, rule_no + ':') < 0)
-			run(sprintf('%s rule add pref %d fwmark %s/%s unreachable', ip_ver, rule_no, mwan4.mmx_unreachable, mwan4.mmx_mask));
+			run(sprintf('%s rule add pref %d fwmark %s/%s unreachable', ip_ver, rule_no, mmx_unreachable, mmx_mask));
 	}
 }
 
@@ -625,9 +625,9 @@ function set_general_rules() {
 function _nft_set_check_rules(family, zero_check) { // ucode-lsp disable
 	let flag = (family == 'ipv4') ? NFT_IPV4 : NFT_IPV6;
 	let mark_expr = zero_check
-		? sprintf('meta mark & %s == 0', mwan4.mmx_mask)
-		: sprintf('meta mark & %s != %s', mwan4.mmx_mask, mwan4.mmx_default);
-	let mark_set = sprintf('meta mark set (meta mark & ~%s) | %s', mwan4.mmx_mask, mwan4.mmx_default);
+		? sprintf('meta mark & %s == 0', mmx_mask)
+		: sprintf('meta mark & %s != %s', mmx_mask, mmx_default);
+	let mark_set = sprintf('meta mark set (meta mark & ~%s) | %s', mmx_mask, mmx_default);
 
 	let rules = [];
 	for (let settype in ['custom', 'connected', 'dynamic'])
@@ -643,7 +643,7 @@ function set_general_nftables() {
 
 	// Sets
 	for (let fam in ['ipv4', 'ipv6']) {
-		if (fam == 'ipv6' && mwan4.no_ipv6 != 0) continue;
+		if (fam == 'ipv6' && no_ipv6 != 0) continue;
 		let addr_type = (fam == 'ipv4') ? 'ipv4_addr' : 'ipv6_addr';
 		for (let settype in ['connected', 'custom', 'dynamic']) {
 			push(L, '',
@@ -667,7 +667,7 @@ function set_general_nftables() {
 		sprintf('\tchain %s_rules_ipv4 {', NFT_PREFIX),
 		'\t}'
 	);
-	if (mwan4.no_ipv6 == 0) {
+	if (no_ipv6 == 0) {
 		push(L, '',
 			sprintf('\tchain %s_rules_ipv6 {', NFT_PREFIX),
 			'\t}'
@@ -680,7 +680,7 @@ function set_general_nftables() {
 		sprintf('\tchain %s_rules {', NFT_PREFIX),
 		sprintf('\t\t%s jump %s_rules_ipv4', NFT_IPV4, NFT_PREFIX),
 	];
-	if (mwan4.no_ipv6 == 0)
+	if (no_ipv6 == 0)
 		push(rules_lines, sprintf('\t\t%s jump %s_rules_ipv6', NFT_IPV6, NFT_PREFIX));
 	push(rules_lines, '\t}');
 	push(L, ...rules_lines);
@@ -707,20 +707,20 @@ function set_general_nftables() {
 		push(L, ...ra_exempt);
 
 		// Restore mark from conntrack
-		push(L, sprintf('\t\tct mark & %s != 0 meta mark set (meta mark & ~%s) | (ct mark & %s)', mwan4.mmx_mask, mwan4.mmx_mask, mwan4.mmx_mask));
+		push(L, sprintf('\t\tct mark & %s != 0 meta mark set (meta mark & ~%s) | (ct mark & %s)', mmx_mask, mmx_mask, mmx_mask));
 		// Interface input
-		push(L, sprintf('\t\tmeta mark & %s == 0 jump %s_ifaces_in', mwan4.mmx_mask, NFT_PREFIX));
+		push(L, sprintf('\t\tmeta mark & %s == 0 jump %s_ifaces_in', mmx_mask, NFT_PREFIX));
 		// Pre-rule set checks (mark == 0)
 		push(L, ..._nft_set_check_rules('ipv4', true));
-		if (mwan4.no_ipv6 == 0)
+		if (no_ipv6 == 0)
 			push(L, ..._nft_set_check_rules('ipv6', true));
 		// User rules
-		push(L, sprintf('\t\tmeta mark & %s == 0 jump %s_rules', mwan4.mmx_mask, NFT_PREFIX));
+		push(L, sprintf('\t\tmeta mark & %s == 0 jump %s_rules', mmx_mask, NFT_PREFIX));
 		// Save to conntrack (preserve non-mwan4 bits)
-		push(L, sprintf('\t\tct mark set (ct mark & ~%s) | (meta mark & %s)', mwan4.mmx_mask, mwan4.mmx_mask));
+		push(L, sprintf('\t\tct mark set (ct mark & ~%s) | (meta mark & %s)', mmx_mask, mmx_mask));
 		// Post-rule set checks (mark != default)
 		push(L, ..._nft_set_check_rules('ipv4', false));
-		if (mwan4.no_ipv6 == 0)
+		if (no_ipv6 == 0)
 			push(L, ..._nft_set_check_rules('ipv6', false));
 
 		push(L, '\t}');
@@ -757,7 +757,7 @@ function set_custom_nftset() {
 	if (!has_v4) push(lines, '\t\t\t127.0.0.1,');
 	push(lines, '\t\t}', '\t}');
 
-	if (mwan4.no_ipv6 == 0) {
+	if (no_ipv6 == 0) {
 		push(lines,
 			'',
 			sprintf('\tset %s_custom_ipv6 {', NFT_PREFIX),
@@ -829,7 +829,7 @@ function set_connected_ipv4() {
 }
 
 function set_connected_ipv6() {
-	if (mwan4.no_ipv6 != 0) return;
+	if (no_ipv6 != 0) return;
 
 	let lines = [
 		sprintf('table inet %s {', NFT_TABLE),
@@ -867,7 +867,7 @@ function set_dynamic_nftset() {
 		'\t\tauto-merge',
 		'\t}',
 	];
-	if (mwan4.no_ipv6 == 0) {
+	if (no_ipv6 == 0) {
 		push(lines, '',
 			sprintf('\tset %s_dynamic_ipv6 {', NFT_PREFIX),
 			'\t\ttype ipv6_addr',
@@ -898,23 +898,23 @@ function rebuild_iface_nftfile() {
 		if (!device) return;
 
 		for (let family in get_families(iface)) {
-			if (family == 'ipv6' && mwan4.no_ipv6 != 0) continue;
+			if (family == 'ipv6' && no_ipv6 != 0) continue;
 			let nftflag = (family == 'ipv4') ? NFT_IPV4 : NFT_IPV6;
 			let id = get_iface_id(iface);
 			if (!id) return;
 			let chain_name = sprintf('%s_iface_in_%s_%s', NFT_PREFIX, iface, family);
-			let mark = id2mask(id, mwan4.mmx_mask);
+			let mark = id2mask(id, mmx_mask);
 
 			push(L, '', sprintf('\tchain %s {', chain_name));
 			for (let settype in ['custom', 'connected', 'dynamic'])
 				push(L, sprintf('\t\tiifname "%s" %s saddr @%s_%s_%s meta mark & %s == 0 meta mark set %s comment "default"',
-					device, nftflag, NFT_PREFIX, settype, family, mwan4.mmx_mask, mwan4.mmx_default));
+					device, nftflag, NFT_PREFIX, settype, family, mmx_mask, mmx_default));
 			push(L, sprintf('\t\tiifname "%s" meta mark & %s == 0 meta mark set %s comment "%s"',
-				device, mwan4.mmx_mask, mark, iface));
+				device, mmx_mask, mark, iface));
 			push(L, '\t}');
 
 			push(jump_rules, sprintf('\t\tmeta mark & %s == 0 %s jump %s',
-				mwan4.mmx_mask, nftflag, chain_name));
+				mmx_mask, nftflag, chain_name));
 		}
 	});
 
@@ -934,15 +934,15 @@ function _create_strategy_chain(strategy_name, accumulator) { // ucode-lsp disab
 	let last_resort_mark;
 
 	if (length(strategy_name) > 15) {
-		push(mwan4.warnings, { code: 'warningStrategyNameTooLong', info: strategy_name });
+		push(status.warnings, { code: 'warningStrategyNameTooLong', info: strategy_name });
 		LOG('warn', sprintf('Strategy %s exceeds 15 chars, skipping', strategy_name));
 		return;
 	}
 
 	switch (last_resort) {
-		case 'blackhole': last_resort_mark = mwan4.mmx_blackhole; break;
-		case 'default':   last_resort_mark = mwan4.mmx_default; break;
-		default:          last_resort_mark = mwan4.mmx_unreachable; break;
+		case 'blackhole': last_resort_mark = mmx_blackhole; break;
+		case 'default':   last_resort_mark = mmx_default; break;
+		default:          last_resort_mark = mmx_unreachable; break;
 	}
 
 	// Collect route info per family
@@ -964,10 +964,10 @@ function _create_strategy_chain(strategy_name, accumulator) { // ucode-lsp disab
 
 		let device = network_get_device(iface);
 		let is_online = (get_iface_hotplug_state(iface) == 'online');
-		let mark = id2mask(id, mwan4.mmx_mask);
+		let mark = id2mask(id, mmx_mask);
 
 		for (let family in get_families(iface)) {
-			if (family == 'ipv6' && mwan4.no_ipv6 != 0) continue;
+			if (family == 'ipv6' && no_ipv6 != 0) continue;
 			push(family_routes[family], { iface, metric, weight, mark, device, is_online });
 		}
 	}
@@ -976,7 +976,7 @@ function _create_strategy_chain(strategy_name, accumulator) { // ucode-lsp disab
 	let L = [];
 
 	for (let family in ['ipv4', 'ipv6']) {
-		if (family == 'ipv6' && mwan4.no_ipv6 != 0) continue;
+		if (family == 'ipv6' && no_ipv6 != 0) continue;
 
 		push(L, sprintf('\tchain %s_strategy_%s_%s {', NFT_PREFIX, strategy_name, family));
 
@@ -999,11 +999,11 @@ function _create_strategy_chain(strategy_name, accumulator) { // ucode-lsp disab
 				if (i == length(active) - 1) {
 					// Last route: catch-all
 					push(L, sprintf('\t\tmeta mark & %s == 0 meta mark set %s comment "%s %d %d"',
-						mwan4.mmx_mask, r.mark, r.iface, r.weight, total_weight));
+						mmx_mask, r.mark, r.iface, r.weight, total_weight));
 				} else {
 					// Probabilistic: weight/remaining chance
 					push(L, sprintf('\t\tmeta mark & %s == 0 numgen random mod %d < %d meta mark set %s comment "%s %d %d"',
-						mwan4.mmx_mask, remaining, r.weight, r.mark, r.iface, r.weight, total_weight));
+						mmx_mask, remaining, r.weight, r.mark, r.iface, r.weight, total_weight));
 					remaining -= r.weight;
 				}
 			}
@@ -1012,12 +1012,12 @@ function _create_strategy_chain(strategy_name, accumulator) { // ucode-lsp disab
 			let offline_with_dev = filter(routes, r => !r.is_online && r.device);
 			for (let r in offline_with_dev)
 				push(L, sprintf('\t\toifname "%s" meta mark & %s == 0 meta mark set %s comment "out %s %s"',
-					r.device, mwan4.mmx_mask, mwan4.mmx_default, r.iface, r.device));
+					r.device, mmx_mask, mmx_default, r.iface, r.device));
 		}
 
 		// Last resort fallback (always last in chain)
 		push(L, sprintf('\t\tmeta mark & %s == 0 meta mark set %s comment "%s"',
-			mwan4.mmx_mask, last_resort_mark, last_resort));
+			mmx_mask, last_resort_mark, last_resort));
 		push(L, '\t}');
 	}
 
@@ -1059,7 +1059,7 @@ function _collect_sticky_ifaces(rule_name, family, strategy_name) { // ucode-lsp
 
 		let id = get_iface_id(iface);
 		if (!id) continue;
-		let mark = id2mask(id, mwan4.mmx_mask);
+		let mark = id2mask(id, mmx_mask);
 		push(sticky_ifaces, { iface, mark });
 	}
 
@@ -1067,7 +1067,7 @@ function _collect_sticky_ifaces(rule_name, family, strategy_name) { // ucode-lsp
 }
 
 function _build_user_rule(s, family_flag) { // ucode-lsp disable
-	if (family_flag == 'ipv6' && mwan4.no_ipv6 != 0) return null;
+	if (family_flag == 'ipv6' && no_ipv6 != 0) return null;
 
 	let rule = s['.name'];
 	let sticky = int(s.sticky || '0');
@@ -1123,7 +1123,7 @@ function _build_user_rule(s, family_flag) { // ucode-lsp disable
 	}
 
 	if (length(rule) > 15) {
-		push(mwan4.warnings, { code: 'warningRuleNameTooLong', info: rule });
+		push(status.warnings, { code: 'warningRuleNameTooLong', info: rule });
 		LOG('warn', sprintf('Rule %s exceeds 15 chars, skipping', rule));
 		return null;
 	}
@@ -1151,9 +1151,9 @@ function _build_user_rule(s, family_flag) { // ucode-lsp disable
 	let mark_action;
 	let is_strategy_jump = false;
 	switch (use_strategy) {
-		case 'default':     mark_action = sprintf('meta mark set %s', mwan4.mmx_default); break;
-		case 'unreachable': mark_action = sprintf('meta mark set %s', mwan4.mmx_unreachable); break;
-		case 'blackhole':   mark_action = sprintf('meta mark set %s', mwan4.mmx_blackhole); break;
+		case 'default':     mark_action = sprintf('meta mark set %s', mmx_default); break;
+		case 'unreachable': mark_action = sprintf('meta mark set %s', mmx_unreachable); break;
+		case 'blackhole':   mark_action = sprintf('meta mark set %s', mmx_blackhole); break;
 		default:
 			is_strategy_jump = true;
 			mark_action = sprintf('jump %s_strategy_%s_%s', NFT_PREFIX, use_strategy, family_flag);
@@ -1205,7 +1205,7 @@ function set_user_rules() {
 			sprintf('\t\ttimeout %ds', timeout),
 			'\t}'
 		);
-		if (mwan4.no_ipv6 == 0) {
+		if (no_ipv6 == 0) {
 			push(L,
 				sprintf('\tmap %s_rule_ipv6_%s {', NFT_PREFIX, rule_name),
 				'\t\ttypeof ip6 saddr : meta mark',
@@ -1227,23 +1227,23 @@ function set_user_rules() {
 		push(L, sprintf('\tchain %s_rule_%s_%s {', NFT_PREFIX, rule_name, fam));
 		// Sticky map lookup: restore mark from previous session
 		push(L, sprintf('\t\tmeta mark & %s == 0 meta mark set %s map @%s_rule_%s_%s',
-			mwan4.mmx_mask, saddr, NFT_PREFIX, fam, rule_name));
+			mmx_mask, saddr, NFT_PREFIX, fam, rule_name));
 		// No sticky hit: let strategy assign mark
 		push(L, sprintf('\t\tmeta mark & %s == 0 jump %s_strategy_%s_%s',
-			mwan4.mmx_mask, NFT_PREFIX, strategy, fam));
+			mmx_mask, NFT_PREFIX, strategy, fam));
 		// Update sticky map with current assignment
 		push(L, sprintf('\t\tmeta mark & %s != 0 meta mark & %s != %s update @%s_rule_%s_%s { %s : meta mark }',
-			mwan4.mmx_mask, mwan4.mmx_mask, mwan4.mmx_default, NFT_PREFIX, fam, rule_name, saddr));
+			mmx_mask, mmx_mask, mmx_default, NFT_PREFIX, fam, rule_name, saddr));
 		push(L, '\t}');
 	}
 
 	// Main rules chains per family
 	for (let fam in ['ipv4', 'ipv6']) {
-		if (fam == 'ipv6' && mwan4.no_ipv6 != 0) continue;
+		if (fam == 'ipv6' && no_ipv6 != 0) continue;
 		push(L, sprintf('\tchain %s_rules_%s {', NFT_PREFIX, fam));
 
 		for (let rd in rule_data[fam]) {
-			let prefix = sprintf('%s meta mark & %s == 0', rd.match_str, mwan4.mmx_mask);
+			let prefix = sprintf('%s meta mark & %s == 0', rd.match_str, mmx_mask);
 
 			if (rd.global_logging && rd.rule_logging)
 				push(L, sprintf('\t\t%s log prefix "MWAN4(%s) " comment "%s"', prefix, rd.rule, rd.rule));
@@ -1279,7 +1279,7 @@ function create_iface_route(iface) {
 		if (!id) return;
 
 		let ip_cmd = (family == 'ipv4') ? 'ip -4' : 'ip -6';
-		if (family == 'ipv6' && mwan4.no_ipv6 != 0) return;
+		if (family == 'ipv6' && no_ipv6 != 0) return;
 
 		let existing = cmd_output(sprintf('%s route list table %d 2>/dev/null', ip_cmd, id));
 		update_dev_to_table();
@@ -1307,7 +1307,7 @@ function delete_iface_route(iface) {
 		if (!id) return;
 		if (family == 'ipv4')
 			run(sprintf('ip -4 route flush table %d', id));
-		else if (family == 'ipv6' && mwan4.no_ipv6 == 0)
+		else if (family == 'ipv6' && no_ipv6 == 0)
 			run(sprintf('ip -6 route flush table %d', id));
 	});
 }
@@ -1322,7 +1322,7 @@ function create_iface_rules(iface, device) {
 		let ip_cmd;
 		if (family == 'ipv4')
 			ip_cmd = 'ip -4';
-		else if (family == 'ipv6' && mwan4.no_ipv6 == 0)
+		else if (family == 'ipv6' && no_ipv6 == 0)
 			ip_cmd = 'ip -6';
 		else
 			return;
@@ -1330,10 +1330,10 @@ function create_iface_rules(iface, device) {
 		// Delete existing rules first
 		delete_iface_rules_family(iface, family);
 
-		let mark = id2mask(id, mwan4.mmx_mask);
+		let mark = id2mask(id, mmx_mask);
 		run(sprintf('%s rule add pref %d iif "%s" lookup %d', ip_cmd, id + 1000, device, id));
-		run(sprintf('%s rule add pref %d fwmark %s/%s lookup %d', ip_cmd, id + 2000, mark, mwan4.mmx_mask, id));
-		run(sprintf('%s rule add pref %d fwmark %s/%s unreachable', ip_cmd, id + 3000, mark, mwan4.mmx_mask));
+		run(sprintf('%s rule add pref %d fwmark %s/%s lookup %d', ip_cmd, id + 2000, mark, mmx_mask, id));
+		run(sprintf('%s rule add pref %d fwmark %s/%s unreachable', ip_cmd, id + 3000, mark, mmx_mask));
 	}, device);
 }
 
@@ -1344,7 +1344,7 @@ function delete_iface_rules_family(iface, family) { // ucode-lsp disable
 	let ip_cmd;
 	if (family == 'ipv4')
 		ip_cmd = 'ip -4';
-	else if (family == 'ipv6' && mwan4.no_ipv6 == 0)
+	else if (family == 'ipv6' && no_ipv6 == 0)
 		ip_cmd = 'ip -6';
 	else
 		return;
@@ -1559,82 +1559,104 @@ function ifup(iface, caller) {
 	system(cmd_str);
 }
 
-// ── Method Assignment ────────────────────────────────────────────────
+// ── Module Export ────────────────────────────────────────────────────
 
-mwan4.pkg = pkg;
+export default {
+	// Constants
+	STATUS_DIR,
+	STATUS_NFT_LOG_DIR,
+	TRACK_STATUS_DIR,
+	CONNTRACK_FILE,
+	DEFAULT_LOWEST_METRIC,
+	NFT_TABLE,
+	NFT_PREFIX,
+	NFT_IPV4,
+	NFT_IPV6,
+	NFT_TEMP,
+	NFT_FILES,
+	IPv4_RE,
+	IPv6_RE,
 
-// Core
-mwan4.init = init;
-mwan4.load = load;
-mwan4.LOG = LOG;
-mwan4.set_scriptname = set_scriptname;
-mwan4.read_str = read_str;
-mwan4.read_int = read_int;
-mwan4.cmd_lines = cmd_lines;
-mwan4.nft_file = nft_file;
-mwan4.nft_output = nft_output;
-mwan4.ubus_call = ubus_call;
+	// Core
+	init,
+	load,
+	LOG,
+	set_scriptname,
+	read_str,
+	read_int,
+	cmd_lines,
+	nft_file,
+	nft_output,
+	ubus_call,
+	status,
 
-// UCI
-mwan4.uci_bool = uci_bool;
-mwan4.uci_get = uci_get;
-mwan4.uci_get_list = uci_get_list;
-mwan4.uci_foreach = uci_foreach;
+	// UCI
+	uci_bool,
+	uci_get,
+	uci_get_list,
+	uci_foreach,
 
-// Getters
-mwan4.get_families = get_families;
-mwan4.foreach_family = foreach_family;
-mwan4.get_true_iface = get_true_iface;
-mwan4.get_src_ip = get_src_ip;
-mwan4.get_iface_id = get_iface_id;
-mwan4.get_iface_hotplug_state = get_iface_hotplug_state;
-mwan4.get_mwan4track_status = get_mwan4track_status;
-mwan4.get_uptime = get_uptime;
-mwan4.get_online_time = get_online_time;
-mwan4.get_routes = get_routes;
+	// Getters
+	get_families,
+	foreach_family,
+	get_true_iface,
+	get_src_ip,
+	get_iface_id,
+	get_iface_hotplug_state,
+	get_mwan4track_status,
+	get_uptime,
+	get_online_time,
+	get_routes,
 
-// Table mapping
-mwan4.update_iface_to_table = update_iface_to_table;
-mwan4.update_dev_to_table = update_dev_to_table;
-mwan4.route_line_dev = route_line_dev;
+	// State accessors
+	no_ipv6: () => { _ensure_init(); return no_ipv6; },
+	mmx_mask: () => { _ensure_init(); return mmx_mask; },
+	mmx_default: () => { _ensure_init(); return mmx_default; },
+	mmx_blackhole: () => { _ensure_init(); return mmx_blackhole; },
+	mmx_unreachable: () => { _ensure_init(); return mmx_unreachable; },
+	iface_max: () => { _ensure_init(); return iface_max; },
 
-// Hotplug state
-mwan4.set_iface_hotplug_state = set_iface_hotplug_state;
+	// Table mapping
+	update_iface_to_table,
+	update_dev_to_table,
+	route_line_dev,
 
-// nftables generation
-mwan4.set_general_rules = set_general_rules;
-mwan4.set_general_nftables = set_general_nftables;
-mwan4.set_custom_nftset = set_custom_nftset;
-mwan4.set_connected_ipv4 = set_connected_ipv4;
-mwan4.set_connected_ipv6 = set_connected_ipv6;
-mwan4.set_dynamic_nftset = set_dynamic_nftset;
-mwan4.rebuild_iface_nftfile = rebuild_iface_nftfile;
-mwan4.set_strategies_nftables = set_strategies_nftables;
-mwan4.set_user_rules = set_user_rules;
-mwan4.rebuild_dynamic = rebuild_dynamic;
+	// Hotplug state
+	set_iface_hotplug_state,
 
-// Interface management
-mwan4.create_iface_route = create_iface_route;
-mwan4.delete_iface_route = delete_iface_route;
-mwan4.create_iface_rules = create_iface_rules;
-mwan4.delete_iface_rules = delete_iface_rules;
+	// nftables generation
+	set_general_rules,
+	set_general_nftables,
+	set_custom_nftset,
+	set_connected_ipv4,
+	set_connected_ipv6,
+	set_dynamic_nftset,
+	rebuild_iface_nftfile,
+	set_strategies_nftables,
+	set_user_rules,
+	rebuild_dynamic,
 
-// Reload & utilities
-mwan4.fw4_reload = fw4_reload;
-mwan4.file_exists = file_exists;
+	// Interface management
+	create_iface_route,
+	delete_iface_route,
+	create_iface_rules,
+	delete_iface_rules,
 
-// Reporting
-mwan4.report_iface_status = report_iface_status;
-mwan4.get_strategies_data = get_strategies_data;
-mwan4.report_strategies = report_strategies;
-mwan4.report_connected = report_connected;
-mwan4.report_rules = report_rules;
+	// Reload
+	fw4_reload,
+	file_exists,
 
-// Lifecycle
-mwan4.interface_hotplug_shutdown = interface_hotplug_shutdown;
-mwan4.interface_shutdown = interface_shutdown;
-mwan4.ifup = ifup;
-mwan4.flush_conntrack = flush_conntrack;
-mwan4.track_clean = track_clean;
+	// Reporting
+	report_iface_status,
+	get_strategies_data,
+	report_strategies,
+	report_connected,
+	report_rules,
 
-export default mwan4;
+	// Lifecycle
+	interface_hotplug_shutdown,
+	interface_shutdown,
+	ifup,
+	flush_conntrack,
+	track_clean,
+};

@@ -18,7 +18,6 @@ define Package/mwan4
   SUBMENU:=Routing and Redirection
   TITLE:=Multiwan with nftables support
   URL:=https://github.com/mossdef-org/mwan4/
-  PKGARCH:=all
   CONFLICTS:=mwan3
   DEPENDS:= \
     +ip-full \

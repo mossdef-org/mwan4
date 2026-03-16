@@ -709,7 +709,9 @@ function set_general_nftables() {
 		push(L, ...ra_exempt);
 
 		// Restore mark from conntrack
-		push(L, sprintf('\t\tct mark & %s != 0 meta mark set meta mark & %s | ct mark & %s', mwan4.mmx_mask, mwan4.mmx_mask_inv, mwan4.mmx_mask));
+		// Use single-register form (ct mark & constant) for kernel compatibility;
+		// meta mark is 0 at this point so the masked-OR form is equivalent.
+		push(L, sprintf('\t\tct mark & %s != 0 meta mark set ct mark & %s', mwan4.mmx_mask, mwan4.mmx_mask));
 		// Interface input
 		push(L, sprintf('\t\tmeta mark & %s == 0 jump %s_ifaces_in', mwan4.mmx_mask, NFT_PREFIX));
 		// Pre-rule set checks (mark == 0)
@@ -718,8 +720,9 @@ function set_general_nftables() {
 			push(L, ..._nft_set_check_rules('ipv6', true));
 		// User rules
 		push(L, sprintf('\t\tmeta mark & %s == 0 jump %s_rules', mwan4.mmx_mask, NFT_PREFIX));
-		// Save to conntrack (preserve non-mwan4 bits)
-		push(L, sprintf('\t\tct mark set ct mark & %s | meta mark & %s', mwan4.mmx_mask_inv, mwan4.mmx_mask));
+		// Save to conntrack — meta mark only has mwan4 bits at this point,
+		// so a full copy avoids the cross-register bitwise that older kernels reject.
+		push(L, '\t\tct mark set meta mark');
 		// Post-rule set checks (mark != default)
 		push(L, ..._nft_set_check_rules('ipv4', false));
 		if (mwan4.no_ipv6 == 0)

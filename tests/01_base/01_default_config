@@ -72,7 +72,7 @@ table inet fw4 {
 			nd-neighbor-advert,
 			nd-redirect
 		} return
-		ct mark & 0x3f00 != 0 meta mark set meta mark & 0xffffc0ff | ct mark & 0x3f00
+		ct mark & 0x3f00 != 0 meta mark set ct mark & 0x3f00
 		meta mark & 0x3f00 == 0 jump mwan4_ifaces_in
 		meta mark & 0x3f00 == 0 ip daddr @mwan4_custom_ipv4 meta mark set meta mark & 0xffffc0ff | 0x3f00
 		meta mark & 0x3f00 == 0 ip daddr @mwan4_connected_ipv4 meta mark set meta mark & 0xffffc0ff | 0x3f00
@@ -81,7 +81,7 @@ table inet fw4 {
 		meta mark & 0x3f00 == 0 ip6 daddr @mwan4_connected_ipv6 meta mark set meta mark & 0xffffc0ff | 0x3f00
 		meta mark & 0x3f00 == 0 ip6 daddr @mwan4_dynamic_ipv6 meta mark set meta mark & 0xffffc0ff | 0x3f00
 		meta mark & 0x3f00 == 0 jump mwan4_rules
-		ct mark set ct mark & 0xffffc0ff | meta mark & 0x3f00
+		ct mark set meta mark
 		meta mark & 0x3f00 != 0x3f00 ip daddr @mwan4_custom_ipv4 meta mark set meta mark & 0xffffc0ff | 0x3f00
 		meta mark & 0x3f00 != 0x3f00 ip daddr @mwan4_connected_ipv4 meta mark set meta mark & 0xffffc0ff | 0x3f00
 		meta mark & 0x3f00 != 0x3f00 ip daddr @mwan4_dynamic_ipv4 meta mark set meta mark & 0xffffc0ff | 0x3f00
@@ -99,7 +99,7 @@ table inet fw4 {
 			nd-neighbor-advert,
 			nd-redirect
 		} return
-		ct mark & 0x3f00 != 0 meta mark set meta mark & 0xffffc0ff | ct mark & 0x3f00
+		ct mark & 0x3f00 != 0 meta mark set ct mark & 0x3f00
 		meta mark & 0x3f00 == 0 jump mwan4_ifaces_in
 		meta mark & 0x3f00 == 0 ip daddr @mwan4_custom_ipv4 meta mark set meta mark & 0xffffc0ff | 0x3f00
 		meta mark & 0x3f00 == 0 ip daddr @mwan4_connected_ipv4 meta mark set meta mark & 0xffffc0ff | 0x3f00
@@ -108,7 +108,7 @@ table inet fw4 {
 		meta mark & 0x3f00 == 0 ip6 daddr @mwan4_connected_ipv6 meta mark set meta mark & 0xffffc0ff | 0x3f00
 		meta mark & 0x3f00 == 0 ip6 daddr @mwan4_dynamic_ipv6 meta mark set meta mark & 0xffffc0ff | 0x3f00
 		meta mark & 0x3f00 == 0 jump mwan4_rules
-		ct mark set ct mark & 0xffffc0ff | meta mark & 0x3f00
+		ct mark set meta mark
 		meta mark & 0x3f00 != 0x3f00 ip daddr @mwan4_custom_ipv4 meta mark set meta mark & 0xffffc0ff | 0x3f00
 		meta mark & 0x3f00 != 0x3f00 ip daddr @mwan4_connected_ipv4 meta mark set meta mark & 0xffffc0ff | 0x3f00
 		meta mark & 0x3f00 != 0x3f00 ip daddr @mwan4_dynamic_ipv4 meta mark set meta mark & 0xffffc0ff | 0x3f00

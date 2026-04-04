@@ -17,6 +17,34 @@ if (family == 'ipv6' && m.no_ipv6) {
 
 let ip = (family == 'ipv4') ? 'ip -4' : 'ip -6';
 
+// ── Debounce state for connected-set rebuilds ──────────────────────
+let last_connected_rebuild = 0;
+let connected_rebuild_pending = false;
+const DEBOUNCE_SEC = 1;
+
+function rebuild_connected_set() {
+	if (family == 'ipv4')
+		m.set_connected_ipv4();
+	else
+		m.set_connected_ipv6();
+	last_connected_rebuild = time();
+	connected_rebuild_pending = false;
+}
+
+function schedule_connected_rebuild() {
+	let now = time();
+	if (now - last_connected_rebuild >= DEBOUNCE_SEC) {
+		rebuild_connected_set();
+	} else {
+		connected_rebuild_pending = true;
+	}
+}
+
+function flush_pending_rebuild() {
+	if (connected_rebuild_pending)
+		rebuild_connected_set();
+}
+
 // ── Check if interface is active (nftables chain exists) ─────────────
 
 function iface_active(iface, fam) { // ucode-lsp disable
@@ -78,11 +106,6 @@ function handle_route(raw_line) {
 				m.pkg.NFT_TABLE, m.pkg.NFT_PREFIX, family, prefix));
 	} else {
 		action = 'del';
-		// Rebuild connected set
-		if (family == 'ipv4')
-			m.set_connected_ipv4();
-		else
-			m.set_connected_ipv6();
 	}
 
 	if (match(route_line, /linkdown/)) {
@@ -96,7 +119,7 @@ function handle_route(raw_line) {
 	route_line = replace(route_line, /error [0-9]+/, '');
 	route_line = trim(replace(route_line, /  +/, ' '));
 
-	// For delete: check route still exists in main table
+	// For delete: check route still exists in main table (ECMP awareness)
 	if (action == 'del') {
 		let main_routes = m.get_routes(family);
 		for (let r in main_routes) {
@@ -105,6 +128,8 @@ function handle_route(raw_line) {
 				return;
 			}
 		}
+		// Route is truly gone — rebuild connected set (debounced)
+		schedule_connected_rebuild();
 	}
 
 	m.update_dev_to_table();
@@ -176,6 +201,7 @@ let line;
 while ((line = mon.read('line')) != null) {
 	line = rtrim('' + line, '\n');
 	if (!length(line) || index(line, 'table') >= 0) continue;
+	flush_pending_rebuild();
 	m.LOG('debug', 'handling route update', family, line);
 	handle_route(line);
 }

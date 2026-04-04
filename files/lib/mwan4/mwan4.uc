@@ -1168,7 +1168,7 @@ function _build_user_rule(s, family_flag) { // ucode-lsp disable
 
 	return {
 		rule, family_flag, match_str, mark_action,
-		is_strategy_jump, sticky, timeout, use_strategy,
+		is_strategy_jump, sticky, timeout, use_strategy, ipset,
 		rule_logging,
 		global_logging: int(uci_get('globals', 'logging') || '0'),
 		loglevel: uci_get('globals', 'loglevel') || 'notice',
@@ -1200,6 +1200,23 @@ function set_user_rules() {
 
 	// Build nft file: sticky set defs, sticky chains, then rule chains
 	let L = [sprintf('table inet %s {', NFT_TABLE)];
+
+	// Pre-create nft sets referenced by ipset option (e.g., dnsmasq nftset targets)
+	let seen_sets = {};
+	for (let fam in ['ipv4', 'ipv6']) {
+		for (let rd in rule_data[fam]) {
+			if (!rd.ipset || seen_sets[rd.ipset]) continue;
+			seen_sets[rd.ipset] = true;
+			let set_type = (fam == 'ipv4') ? 'ipv4_addr' : 'ipv6_addr';
+			push(L,
+				sprintf('\tset %s {', rd.ipset),
+				sprintf('\t\ttype %s', set_type),
+				'\t\tflags interval',
+				'\t\tauto-merge',
+				'\t}'
+			);
+		}
+	}
 
 	// Sticky map definitions (maps source address -> mark for session persistence)
 	for (let rule_name in keys(sticky_set_defs)) {
@@ -1529,12 +1546,15 @@ function track_clean(iface) {
 // ── Conntrack ────────────────────────────────────────────────────────
 
 function flush_conntrack(iface, action) {
-	if (!file_exists(CONNTRACK_FILE)) return;
 	let flush_list = uci_get_list(iface, 'flush_conntrack');
 	for (let trigger in flush_list) {
 		if (trigger == action) {
-			writefile(CONNTRACK_FILE, 'f');
-			LOG('info', sprintf("conntrack flushed for '%s' on '%s'", iface, action));
+			let mark = get_iface_mark(iface);
+			if (mark) {
+				run(sprintf('conntrack -D --mark %s/%s 2>/dev/null', mark, mwan4.mmx_mask));
+				LOG('info', sprintf("conntrack flushed for '%s' (mark %s/%s) on '%s'",
+					iface, mark, mwan4.mmx_mask, action));
+			}
 			break;
 		}
 	}

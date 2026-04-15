@@ -2,7 +2,7 @@ let mocklib = global.mocklib; // ucode-lsp disable
 
 let byte = (str, off) => { // ucode-lsp disable
 	let v = ord(str, off);
-	return length(v) ? v[0] : v;
+	return type(v) == 'array' ? v[0] : v;
 };
 
 let hash = (s) => { // ucode-lsp disable
@@ -95,7 +95,7 @@ return {
 			}
 
 			let cfg = this._configs[config],
-			    extended = match(section, "^@([A-Za-z0-9_-]+)\\[(-?[0-9]+)\\]$");
+			    extended = match('' + section, /^@([A-Za-z0-9_-]+)\[(-?[0-9]+)\]$/);
 
 			if (extended) {
 				let stype = extended[1],
@@ -107,7 +107,7 @@ return {
 				);
 
 				if (sindex < 0)
-					sindex = sids.length + sindex;
+					sindex = length(sids) + sindex;
 
 				return cfg[sids[sindex]];
 			}

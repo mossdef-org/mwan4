@@ -21,19 +21,77 @@ jobs:
       matrix:
         include:
           - version: openwrt-24.10
-            target: x86_64
-          - version: openwrt-24.10
             target: aarch64_cortex-a53
+          - version: openwrt-24.10
+            target: aarch64_cortex-a72
+          - version: openwrt-24.10
+            target: aarch64_cortex-a76
           - version: openwrt-24.10
             target: aarch64_generic
           - version: openwrt-24.10
+            target: arm_arm1176jzf-s_vfp
+          - version: openwrt-24.10
+            target: arm_arm926ej-s
+          - version: openwrt-24.10
+            target: arm_cortex-a15_neon-vfpv4
+          - version: openwrt-24.10
+            target: arm_cortex-a5_vfpv4
+          - version: openwrt-24.10
             target: arm_cortex-a7
+          - version: openwrt-24.10
+            target: arm_cortex-a7_neon-vfpv4
+          - version: openwrt-24.10
+            target: arm_cortex-a7_vfpv4
+          - version: openwrt-24.10
+            target: arm_cortex-a8_vfpv3
           - version: openwrt-24.10
             target: arm_cortex-a9
           - version: openwrt-24.10
+            target: arm_cortex-a9_neon
+          - version: openwrt-24.10
+            target: arm_cortex-a9_vfpv3-d16
+          - version: openwrt-24.10
+            target: arm_fa526
+          - version: openwrt-24.10
+            target: arm_xscale
+          - version: openwrt-24.10
+            target: armeb_xscale
+          - version: openwrt-24.10
+            target: i386_pentium-mmx
+          - version: openwrt-24.10
+            target: i386_pentium4
+          - version: openwrt-24.10
+            target: loongarch64_generic
+          - version: openwrt-24.10
+            target: mips64_mips64r2
+          - version: openwrt-24.10
+            target: mips64_octeonplus
+          - version: openwrt-24.10
+            target: mips64el_mips64r2
+          - version: openwrt-24.10
             target: mips_24kc
           - version: openwrt-24.10
+            target: mips_4kec
+          - version: openwrt-24.10
+            target: mips_mips32
+          - version: openwrt-24.10
             target: mipsel_24kc
+          - version: openwrt-24.10
+            target: mipsel_24kc_24kf
+          - version: openwrt-24.10
+            target: mipsel_74kc
+          - version: openwrt-24.10
+            target: mipsel_mips32
+          - version: openwrt-24.10
+            target: powerpc64_e5500
+          - version: openwrt-24.10
+            target: powerpc_464fp
+          - version: openwrt-24.10
+            target: powerpc_8548
+          - version: openwrt-24.10
+            target: riscv64_riscv64
+          - version: openwrt-24.10
+            target: x86_64
           - version: openwrt-25.12
             target: aarch64_cortex-a53
           - version: openwrt-25.12
@@ -134,11 +192,18 @@ jobs:
 
       - name: 🧮 Compute ARCH
         run: |
-          if [ "${{ matrix.version }}" = "snapshots" ]; then
-            echo "ARCH=${{ matrix.target }}-SNAPSHOT" >> "$GITHUB_ENV"
-          else
-            echo "ARCH=${{ matrix.target }}-${{ matrix.version }}" >> "$GITHUB_ENV"
-          fi
+          # matrix.version is the release-line LABEL baked into artifact filenames
+          # (sync_repo.sh matches *_openwrt-25.12_*), NOT the SDK image tag. Pin the
+          # SDK to a specific STABLE point release so builds are reproducible and
+          # immune to <ver>-SNAPSHOT mirror churn (rotated/truncated tarballs →
+          # sha256 mismatch). Bump these when a new point release ships.
+          case "${{ matrix.version }}" in
+            openwrt-25.12) SDK_VERSION="25.12.5" ;;
+            openwrt-24.10) SDK_VERSION="24.10.7" ;;
+            snapshots)     SDK_VERSION="SNAPSHOT" ;;
+            *)             SDK_VERSION="${{ matrix.version }}" ;;
+          esac
+          echo "ARCH=${{ matrix.target }}-${SDK_VERSION}" >> "$GITHUB_ENV"
 
       - name: 🏗️ Build with OpenWrt SDK
         uses: openwrt/gh-action-sdk@v8
